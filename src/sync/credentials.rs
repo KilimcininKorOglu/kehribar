@@ -44,6 +44,25 @@ pub fn resolve(
     }
 }
 
+/// Prefix of a Bitbucket Cloud API token.
+const BITBUCKET_API_TOKEN_PREFIX: &str = "ATAT";
+/// The username Bitbucket Cloud accepts for Git with any API token.
+pub const BITBUCKET_API_TOKEN_GIT_USER: &str = "x-bitbucket-api-token-auth";
+
+/// The credentials Git sends. A Bitbucket API token authenticates the REST
+/// API with the Atlassian account email, but Git with a fixed username, so
+/// one stored username cannot serve both.
+pub fn for_git(credentials: Credentials, bitbucket: bool) -> Credentials {
+    if bitbucket && credentials.password.starts_with(BITBUCKET_API_TOKEN_PREFIX) {
+        Credentials {
+            username: BITBUCKET_API_TOKEN_GIT_USER.to_owned(),
+            ..credentials
+        }
+    } else {
+        credentials
+    }
+}
+
 /// The default credentials of a host, which also call its API.
 pub fn for_host(cipher: &Cipher, host: &Host) -> Result<Option<Credentials>, String> {
     decrypt(cipher, &host.token_enc, &host.username)
@@ -156,6 +175,23 @@ mod tests {
             resolve(&cipher(), &plain, Some(&empty_host))
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn bitbucket_api_tokens_use_the_fixed_git_username() {
+        let creds = |password: &str| Credentials {
+            username: "me@example.com".into(),
+            password: password.into(),
+        };
+        let api_token = for_git(creds("ATATT3xFf"), true);
+        assert_eq!(api_token.username, BITBUCKET_API_TOKEN_GIT_USER);
+        assert_eq!(api_token.password, "ATATT3xFf");
+        // Other tokens and other providers keep the configured username.
+        assert_eq!(for_git(creds("other"), true).username, "me@example.com");
+        assert_eq!(
+            for_git(creds("ATATT3xFf"), false).username,
+            "me@example.com"
         );
     }
 

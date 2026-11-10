@@ -107,11 +107,12 @@ impl Job<'_> {
 }
 
 async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failure> {
-    let credentials =
-        credentials::resolve(&ctx.cipher, job.repo, job.host).map_err(|message| Failure {
+    let credentials = credentials::resolve(&ctx.cipher, job.repo, job.host)
+        .map_err(|message| Failure {
             status: RepoStatus::Error,
             message,
-        })?;
+        })?
+        .map(|c| credentials::for_git(c, job.is_bitbucket()));
     let credentials = credentials.as_ref();
     let report = mirror::sync(job.git, &job.repo.url, job.dir, credentials, job.now).await?;
     let has_wiki = if job.repo.wiki_enabled {

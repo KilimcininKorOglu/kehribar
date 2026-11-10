@@ -83,7 +83,7 @@ Tokens with read access are enough:
 - GitHub: a fine-grained personal access token with read access to "Contents" and "Metadata" of the repositories, or a classic token with the `repo` scope for private repositories.
 - GitLab: a personal, group or project access token with `read_api` and `read_repository`.
 - Forgejo / Gitea: an access token with read permission for repositories, and for organizations and users when you import them.
-- Bitbucket Cloud: an app password with repository read permission. Put the Bitbucket username in the username field; it is used for both Git and the API.
+- Bitbucket Cloud: an API token with scopes (app passwords no longer work), created for the Bitbucket app with the `read:repository:bitbucket` scope. Put the email address of the Atlassian account in the username field. The REST API authenticates with that email; for Git, git-archive sends the fixed username `x-bitbucket-api-token-auth` that Bitbucket requires with API tokens.
 
 The username field may stay empty for GitHub, GitLab, Forgejo and Gitea.
 
