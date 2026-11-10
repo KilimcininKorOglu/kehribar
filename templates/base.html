@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="{{ layout.lang_code() }}"{% if let Some(theme) = layout.theme_attr() %} data-theme="{{ theme }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <title>{% block title %}{% endblock %} · {{ layout.t("app.name") }}</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ layout.asset_version() }}">
+  <script src="/static/htmx.min.js?v={{ layout.asset_version() }}" defer></script>
+</head>
+<body{% if let Some(csrf) = layout.csrf %} hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'{% endif %}>
+  <a class="skip-link" href="#main">{{ layout.t("app.skip") }}</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3a3 3 0 0 0-1 5.83v6.34A3 3 0 1 0 7 15.17V13.5c.84.63 1.87 1 3 1h4a3 3 0 0 0 3-3v-.17a3 3 0 1 0-2 0v.17a1 1 0 0 1-1 1h-4a3 3 0 0 1-3-3V8.83A3 3 0 0 0 6 3Z"/></svg>
+        <span>{{ layout.t("app.name") }}</span>
+      </a>
+      {% if layout.csrf.is_some() %}
+      <nav class="mainnav" aria-label="{{ layout.t("nav.main") }}">
+        <a href="/" aria-current="{{ layout.current("repos") }}">{{ layout.t("nav.repos") }}</a>
+        <a href="/sources" aria-current="{{ layout.current("sources") }}">{{ layout.t("nav.sources") }}</a>
+        <a href="/hosts" aria-current="{{ layout.current("hosts") }}">{{ layout.t("nav.hosts") }}</a>
+        <a href="/settings" aria-current="{{ layout.current("settings") }}">{{ layout.t("nav.settings") }}</a>
+      </nav>
+      {% endif %}
+      <div class="topbar-tools">
+        <form class="prefs" method="post" action="/prefs" hx-post="/prefs" hx-trigger="change" hx-swap="none">
+          <input type="hidden" name="back" value="{{ layout.path }}">
+          <label>
+            <span class="visually-hidden">{{ layout.t("prefs.theme") }}</span>
+            <select name="theme" title="{{ layout.t("prefs.theme") }}">
+              {% for theme in layout.themes() %}
+              <option value="{{ theme.code() }}"{% if layout.is_theme(theme) %} selected{% endif %}>{{ layout.theme_label(theme) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span class="visually-hidden">{{ layout.t("prefs.lang") }}</span>
+            <select name="lang" title="{{ layout.t("prefs.lang") }}">
+              {% for lang in layout.langs() %}
+              <option value="{{ lang.code() }}"{% if layout.is_lang(lang) %} selected{% endif %}>{{ layout.lang_label(lang) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <noscript><button class="btn btn-ghost btn-sm" type="submit">{{ layout.t("prefs.apply") }}</button></noscript>
+        </form>
+        {% if let Some(csrf) = layout.csrf %}
+        <form method="post" action="/logout">
+          <input type="hidden" name="_csrf" value="{{ csrf }}">
+          <button class="btn btn-ghost btn-sm" type="submit">{{ layout.t("nav.logout") }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+  <main id="main" class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

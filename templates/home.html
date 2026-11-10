@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("home.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>{{ layout.t("home.title") }}</h1>
+</div>
+<section class="card empty-state">
+  <h2>{{ layout.t("home.empty_title") }}</h2>
+  <p class="muted">{{ layout.t("home.empty_body") }}</p>
+</section>
+{% endblock %}

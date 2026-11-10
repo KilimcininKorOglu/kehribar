@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("login.title") }}{% endblock %}
+
+{% block content %}
+<section class="auth-card card">
+  <h1>{{ layout.t("login.heading") }}</h1>
+  <p class="muted">{{ layout.t("app.tagline") }}</p>
+  {% if let Some(error) = error %}
+  <p class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="field">
+      <span>{{ layout.t("login.username") }}</span>
+      <input name="username" autocomplete="username" required autofocus value="{{ username }}">
+    </label>
+    <label class="field">
+      <span>{{ layout.t("login.password") }}</span>
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button class="btn btn-primary" type="submit">{{ layout.t("login.submit") }}</button>
+  </form>
+</section>
+{% endblock %}

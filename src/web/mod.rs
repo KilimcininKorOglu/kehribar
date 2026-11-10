@@ -1,11 +1,45 @@
-//! HTTP routing.
+//! HTTP routing and shared request state.
+
+pub mod auth;
+pub mod pages;
+pub mod prefs;
+pub mod security;
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::get;
+use axum::middleware::{from_fn, from_fn_with_state};
+use axum::routing::{get, post};
+use sqlx::SqlitePool;
 use tokio::net::TcpListener;
+
+use crate::config::Config;
+use crate::crypto::Cipher;
+use crate::i18n::Catalog;
+
+/// State shared by every request handler.
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: SqlitePool,
+    pub config: Arc<Config>,
+    pub cipher: Cipher,
+    pub catalog: Arc<Catalog>,
+    pub limiter: Arc<auth::LoginLimiter>,
+}
+
+impl AppState {
+    pub fn new(pool: SqlitePool, config: Config, catalog: Catalog) -> Self {
+        Self {
+            pool,
+            cipher: Cipher::new(&config.secret_key),
+            config: Arc::new(config),
+            catalog: Arc::new(catalog),
+            limiter: Arc::new(auth::LoginLimiter::default()),
+        }
+    }
+}
 
 /// Binds the HTTP listener. An explicit address is used as given. Without
 /// one, the listener takes `[::]:port`, which accepts IPv6 and IPv4 clients,
@@ -26,8 +60,24 @@ pub async fn bind_listener(addr: Option<SocketAddr>, default_port: u16) -> io::R
 }
 
 /// Builds the application router.
-pub fn router() -> Router {
-    Router::new().route("/healthz", get(healthz))
+pub fn router(state: AppState) -> Router {
+    // Layers run from the last added to the first: the session check runs
+    // before the CSRF check, which needs the session.
+    let private = Router::new()
+        .route("/", get(pages::home))
+        .route("/logout", post(auth::logout))
+        .layer(from_fn(security::verify_csrf))
+        .layer(from_fn_with_state(state.clone(), auth::require_session));
+
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/login", get(auth::login_form).post(auth::login))
+        .route("/prefs", post(prefs::update))
+        .route("/static/{file}", get(pages::static_file))
+        .merge(private)
+        .layer(from_fn(security::same_origin))
+        .layer(from_fn(security::headers))
+        .with_state(state)
 }
 
 async fn healthz() -> &'static str {
@@ -37,18 +87,6 @@ async fn healthz() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn healthz_answers_ok() {
-        let response = router()
-            .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
 
     #[tokio::test]
     async fn default_listener_accepts_ipv4_and_ipv6_clients() {

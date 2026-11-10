@@ -1,0 +1,40 @@
+[app]
+name = "git-archive"
+tagline = "Git repo arşivi"
+skip = "İçeriğe geç"
+
+[nav]
+main = "Ana menü"
+repos = "Repolar"
+sources = "Kaynaklar"
+hosts = "Hostlar"
+settings = "Ayarlar"
+logout = "Çıkış"
+
+[prefs]
+theme = "Tema"
+lang = "Dil"
+apply = "Uygula"
+
+[theme]
+system = "Sistem"
+light = "Açık"
+dark = "Koyu"
+
+[lang]
+tr = "Türkçe"
+en = "English"
+
+[login]
+title = "Giriş"
+heading = "Arşive giriş yapın"
+username = "Kullanıcı adı"
+password = "Parola"
+submit = "Giriş yap"
+failed = "Kullanıcı adı veya parola yanlış."
+locked = "Çok fazla başarısız deneme yapıldı. Biraz bekleyip tekrar deneyin."
+
+[home]
+title = "Repolar"
+empty_title = "Henüz arşivlenmiş repo yok"
+empty_body = "Bir Git URL'si ekleyerek ilk repoyu arşivleyin."

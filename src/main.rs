@@ -3,8 +3,12 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use git_archive::config::{Config, DEFAULT_PORT};
-use git_archive::web;
+use git_archive::db::{self, repos};
+use git_archive::i18n::Catalog;
+use git_archive::web::{self, AppState};
 use tracing_subscriber::EnvFilter;
+
+const DATABASE_FILE: &str = "git-archive.db";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -20,7 +24,8 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
     init_tracing(&config.log_level)?;
-    serve(config.listen_addr).await
+    let state = build_state(config).await?;
+    serve(state).await
 }
 
 fn init_tracing(level: &str) -> Result<(), Box<dyn Error>> {
@@ -31,10 +36,24 @@ fn init_tracing(level: &str) -> Result<(), Box<dyn Error>> {
         .map_err(|err| -> Box<dyn Error> { err })
 }
 
-async fn serve(addr: Option<SocketAddr>) -> Result<(), Box<dyn Error>> {
-    let listener = web::bind_listener(addr, DEFAULT_PORT).await?;
+async fn build_state(config: Config) -> Result<AppState, Box<dyn Error>> {
+    tokio::fs::create_dir_all(&config.data_dir).await?;
+    let pool = db::open(&config.data_dir.join(DATABASE_FILE)).await?;
+    let interrupted = repos::reset_interrupted(&pool).await?;
+    if interrupted > 0 {
+        tracing::warn!(
+            interrupted,
+            "syncs interrupted by the last shutdown will run again"
+        );
+    }
+    Ok(AppState::new(pool, config, Catalog::load()?))
+}
+
+async fn serve(state: AppState) -> Result<(), Box<dyn Error>> {
+    let listener = web::bind_listener(state.config.listen_addr, DEFAULT_PORT).await?;
     tracing::info!(addr = %listener.local_addr()?, "listening");
-    axum::serve(listener, web::router())
+    let app = web::router(state).into_make_service_with_connect_info::<SocketAddr>();
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     tracing::info!("stopped");

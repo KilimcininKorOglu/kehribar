@@ -4,6 +4,9 @@ FROM rust:1-slim-trixie AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock clippy.toml ./
 COPY migrations ./migrations
+COPY locales ./locales
+COPY static ./static
+COPY templates ./templates
 COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \

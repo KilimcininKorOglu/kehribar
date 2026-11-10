@@ -1,0 +1,40 @@
+[app]
+name = "git-archive"
+tagline = "Git repository archive"
+skip = "Skip to content"
+
+[nav]
+main = "Main menu"
+repos = "Repositories"
+sources = "Sources"
+hosts = "Hosts"
+settings = "Settings"
+logout = "Sign out"
+
+[prefs]
+theme = "Theme"
+lang = "Language"
+apply = "Apply"
+
+[theme]
+system = "System"
+light = "Light"
+dark = "Dark"
+
+[lang]
+tr = "Türkçe"
+en = "English"
+
+[login]
+title = "Sign in"
+heading = "Sign in to the archive"
+username = "Username"
+password = "Password"
+submit = "Sign in"
+failed = "Wrong username or password."
+locked = "Too many failed attempts. Wait a while and try again."
+
+[home]
+title = "Repositories"
+empty_title = "No archived repositories yet"
+empty_body = "Add a Git URL to archive your first repository."
