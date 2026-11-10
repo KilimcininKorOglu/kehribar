@@ -2,5 +2,7 @@
 //! a read-only web UI for browsing the archived copies.
 
 pub mod config;
+pub mod crypto;
+pub mod db;
 pub mod error;
 pub mod web;
