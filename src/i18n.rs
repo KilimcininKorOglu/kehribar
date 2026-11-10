@@ -5,26 +5,15 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lang {
-    Tr,
-    En,
+text_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Lang {
+        Tr => "tr",
+        En => "en",
+    }
 }
 
 impl Lang {
-    pub const ALL: [Self; 2] = [Self::Tr, Self::En];
-
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Tr => "tr",
-            Self::En => "en",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|lang| lang.code() == value)
-    }
-
     /// Picks the first supported language of an `Accept-Language` header.
     pub fn from_accept_language(header: &str) -> Option<Self> {
         header.split(',').find_map(|part| {

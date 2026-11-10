@@ -2,27 +2,12 @@
 
 use sqlx::{FromRow, SqlitePool};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum SourceKind {
-    User,
-    Org,
-}
-
-impl SourceKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Org => "org",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "user" => Some(Self::User),
-            "org" => Some(Self::Org),
-            _ => None,
-        }
+text_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+    #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+    pub enum SourceKind {
+        User => "user",
+        Org => "org",
     }
 }
 

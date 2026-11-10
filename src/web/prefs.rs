@@ -17,26 +17,12 @@ use crate::i18n::Lang;
 pub const THEME_COOKIE: &str = "ga_theme";
 pub const LANG_COOKIE: &str = "ga_lang";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Theme {
-    System,
-    Light,
-    Dark,
-}
-
-impl Theme {
-    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::Light => "light",
-            Self::Dark => "dark",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|theme| theme.code() == value)
+text_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Theme {
+        System => "system",
+        Light => "light",
+        Dark => "dark",
     }
 }
 

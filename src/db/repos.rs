@@ -4,27 +4,17 @@ use sqlx::{FromRow, SqlitePool};
 
 use super::like_pattern;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum RepoStatus {
-    /// Added, never synced.
-    Pending,
-    Syncing,
-    Ok,
-    Error,
-    /// The source repository no longer answers; the archive is kept as is.
-    Unreachable,
-}
-
-impl RepoStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Syncing => "syncing",
-            Self::Ok => "ok",
-            Self::Error => "error",
-            Self::Unreachable => "unreachable",
-        }
+text_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+    #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+    pub enum RepoStatus {
+        /// Added, never synced.
+        Pending => "pending",
+        Syncing => "syncing",
+        Ok => "ok",
+        Error => "error",
+        /// The source repository no longer answers; the archive is kept as is.
+        Unreachable => "unreachable",
     }
 }
 

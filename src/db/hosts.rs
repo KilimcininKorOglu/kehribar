@@ -2,37 +2,15 @@
 
 use sqlx::{FromRow, SqlitePool};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum Provider {
-    Github,
-    Gitlab,
-    Forgejo,
-    Bitbucket,
-    Generic,
-}
-
-impl Provider {
-    pub const ALL: [Self; 5] = [
-        Self::Github,
-        Self::Gitlab,
-        Self::Forgejo,
-        Self::Bitbucket,
-        Self::Generic,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Github => "github",
-            Self::Gitlab => "gitlab",
-            Self::Forgejo => "forgejo",
-            Self::Bitbucket => "bitbucket",
-            Self::Generic => "generic",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.as_str() == value)
+text_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+    #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+    pub enum Provider {
+        Github => "github",
+        Gitlab => "gitlab",
+        Forgejo => "forgejo",
+        Bitbucket => "bitbucket",
+        Generic => "generic",
     }
 }
 
@@ -200,7 +178,7 @@ mod tests {
     #[test]
     fn provider_names_round_trip() {
         for provider in Provider::ALL {
-            assert_eq!(Provider::parse(provider.as_str()), Some(provider));
+            assert_eq!(Provider::parse(provider.code()), Some(provider));
         }
         assert_eq!(Provider::parse("svn"), None);
     }
