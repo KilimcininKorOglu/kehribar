@@ -145,6 +145,15 @@ impl RepoView {
         sha.get(..10).unwrap_or(sha)
     }
 
+    /// The revision to show: an object id shortened, a name in full.
+    pub fn rev_label(&self) -> &str {
+        if is_object_id(&self.rev) {
+            self.short(&self.rev)
+        } else {
+            &self.rev
+        }
+    }
+
     /// The links of each directory above `path`, from the root.
     pub fn crumbs(&self, path: &str) -> Vec<(String, String)> {
         let mut crumbs = Vec::new();
@@ -739,6 +748,12 @@ mod tests {
             default.blob_url("a b/c&d.rs"),
             "/repos/3/blob?path=a+b%2Fc%26d.rs"
         );
+        assert_eq!(
+            view(Some("feature/a-long-branch")).rev_label(),
+            "feature/a-long-branch"
+        );
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(view(Some(sha)).rev_label(), "0123456789");
         let tagged = view(Some("feature/x"));
         assert_eq!(tagged.commits_url(), "/repos/3/commits?ref=feature%2Fx");
         assert_eq!(

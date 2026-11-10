@@ -1,6 +1,6 @@
 <nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
 <div class="page-head">
   <h1 class="repo-title"><a class="plain" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a></h1>
-  <p class="rev-chip">{{ layout.t("browse.rev") }}: <code>{{ view.short(view.rev) }}</code> <a class="small" href="/repos/{{ repo.id }}/refs">{{ layout.t("browse.change_rev") }}</a></p>
+  <p class="rev-chip">{{ layout.t("browse.rev") }}: <code>{{ view.rev_label() }}</code> <a class="small" href="/repos/{{ repo.id }}/refs">{{ layout.t("browse.change_rev") }}</a></p>
 </div>
 {% include "repo_tabs.html" %}
