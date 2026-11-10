@@ -450,6 +450,11 @@ textarea:focus {
   gap: 1.25rem;
 }
 
+/* The grid gap spaces its cards; the sibling margin would push one down. */
+.grid-2 > .card {
+  margin-top: 0;
+}
+
 .danger-zone {
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
 }
