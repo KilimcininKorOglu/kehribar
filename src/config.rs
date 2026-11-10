@@ -20,6 +20,9 @@ pub const ENV_SESSION_TTL_HOURS: &str = "GIT_ARCHIVE_SESSION_TTL_HOURS";
 pub const ENV_COOKIE_SECURE: &str = "GIT_ARCHIVE_COOKIE_SECURE";
 pub const ENV_LOG_LEVEL: &str = "GIT_ARCHIVE_LOG_LEVEL";
 
+/// Port of the web UI when `GIT_ARCHIVE_LISTEN_ADDR` is not set.
+pub const DEFAULT_PORT: u16 = 8600;
+
 /// Length in bytes of the key that encrypts stored access tokens.
 pub const SECRET_KEY_LEN: usize = 32;
 
@@ -37,7 +40,8 @@ pub struct Config {
     pub admin_username: String,
     pub admin_password: String,
     pub secret_key: [u8; SECRET_KEY_LEN],
-    pub listen_addr: SocketAddr,
+    /// `None` listens on both IPv6 and IPv4 at [`DEFAULT_PORT`].
+    pub listen_addr: Option<SocketAddr>,
     pub data_dir: PathBuf,
     pub sync_interval_minutes: u32,
     pub sync_concurrency: u32,
@@ -93,7 +97,7 @@ impl Config {
             admin_username: env.required(ENV_ADMIN_USERNAME)?,
             admin_password: env.required(ENV_ADMIN_PASSWORD)?,
             secret_key: parse_secret_key(&env.required(ENV_SECRET_KEY)?)?,
-            listen_addr: SocketAddr::from(([0, 0, 0, 0], 8600)),
+            listen_addr: None,
             data_dir: PathBuf::from("/data"),
             sync_interval_minutes: 360,
             sync_concurrency: 2,
@@ -108,7 +112,7 @@ impl Config {
     where
         F: Fn(&str) -> Option<String>,
     {
-        self.listen_addr = env.parsed(ENV_LISTEN_ADDR, self.listen_addr)?;
+        self.listen_addr = env.optional(ENV_LISTEN_ADDR)?;
         self.data_dir = env.parsed(ENV_DATA_DIR, self.data_dir.clone())?;
         self.session_ttl_hours = env.positive(ENV_SESSION_TTL_HOURS, self.session_ttl_hours)?;
         self.cookie_secure = env.boolean(ENV_COOKIE_SECURE, self.cookie_secure)?;
@@ -146,18 +150,28 @@ where
         self.get(name).ok_or(ConfigError::Missing(name))
     }
 
+    /// Parses the value, or returns `None` when the variable is unset or blank.
+    fn optional<T>(&self, name: &'static str) -> Result<Option<T>, ConfigError>
+    where
+        T: FromStr,
+        T::Err: fmt::Display,
+    {
+        self.get(name)
+            .map(|raw| {
+                raw.parse().map_err(|err: T::Err| ConfigError::Invalid {
+                    name,
+                    reason: err.to_string(),
+                })
+            })
+            .transpose()
+    }
+
     fn parsed<T>(&self, name: &'static str, default: T) -> Result<T, ConfigError>
     where
         T: FromStr,
         T::Err: fmt::Display,
     {
-        match self.get(name) {
-            None => Ok(default),
-            Some(raw) => raw.parse().map_err(|err: T::Err| ConfigError::Invalid {
-                name,
-                reason: err.to_string(),
-            }),
-        }
+        Ok(self.optional(name)?.unwrap_or(default))
     }
 
     fn positive<T>(&self, name: &'static str, default: T) -> Result<T, ConfigError>
@@ -242,7 +256,7 @@ mod tests {
     #[test]
     fn applies_defaults_when_only_required_values_are_set() {
         let config = load(&required()).unwrap();
-        assert_eq!(config.listen_addr.to_string(), "0.0.0.0:8600");
+        assert_eq!(config.listen_addr, None);
         assert_eq!(config.data_dir, PathBuf::from("/data"));
         assert_eq!(config.sync_interval_minutes, 360);
         assert_eq!(config.sync_concurrency, 2);
@@ -310,7 +324,7 @@ mod tests {
         pairs.push((ENV_COOKIE_SECURE, "TRUE"));
         pairs.push((ENV_SYNC_INTERVAL_MINUTES, "15"));
         let config = load(&pairs).unwrap();
-        assert_eq!(config.listen_addr.to_string(), "127.0.0.1:9000");
+        assert_eq!(config.listen_addr.unwrap().to_string(), "127.0.0.1:9000");
         assert!(config.cookie_secure);
         assert_eq!(config.sync_interval_minutes, 15);
     }

@@ -18,8 +18,7 @@ RUN apt-get update \
     && mkdir -p /data \
     && chown gitarchive:gitarchive /data
 COPY --from=builder /usr/local/bin/git-archive /usr/local/bin/git-archive
-ENV GIT_ARCHIVE_DATA_DIR=/data \
-    GIT_ARCHIVE_LISTEN_ADDR=0.0.0.0:8600
+ENV GIT_ARCHIVE_DATA_DIR=/data
 USER 10001
 WORKDIR /data
 EXPOSE 8600

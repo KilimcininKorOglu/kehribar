@@ -2,9 +2,8 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use git_archive::config::Config;
+use git_archive::config::{Config, DEFAULT_PORT};
 use git_archive::web;
-use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -32,9 +31,9 @@ fn init_tracing(level: &str) -> Result<(), Box<dyn Error>> {
         .map_err(|err| -> Box<dyn Error> { err })
 }
 
-async fn serve(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "listening");
+async fn serve(addr: Option<SocketAddr>) -> Result<(), Box<dyn Error>> {
+    let listener = web::bind_listener(addr, DEFAULT_PORT).await?;
+    tracing::info!(addr = %listener.local_addr()?, "listening");
     axum::serve(listener, web::router())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
