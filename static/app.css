@@ -172,8 +172,8 @@ pre,
   position: sticky;
   top: 0;
   z-index: 5;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  backdrop-filter: saturate(160%) blur(8px);
+  /* Opaque: a translucent bar shows the scrolled page through it. */
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
@@ -952,6 +952,11 @@ pre.diff {
 }
 
 @media (max-width: 720px) {
+  /* The bar wraps to three rows here; pinned, it would hide a sixth of the screen. */
+  .topbar {
+    position: static;
+  }
+
   .topbar-inner {
     gap: 0.75rem;
   }
