@@ -264,6 +264,13 @@ pre,
   margin-bottom: 1.25rem;
 }
 
+/* A flex item does not shrink below its content without this, so a long
+   repository name or URL would widen the page instead of wrapping. */
+.page-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -507,6 +514,9 @@ textarea:focus {
 /* Tables */
 
 .table-card {
+  /* The containing block of absolutely positioned cells content, such as
+     visually hidden headers, so the scroll box clips them too. */
+  position: relative;
   padding: 0;
   overflow-x: auto;
 }
