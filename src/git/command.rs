@@ -199,15 +199,27 @@ fn excerpt(stderr: &str) -> String {
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .collect();
-    let tail = lines[lines.len().saturating_sub(3)..].join(" | ");
-    if tail.len() <= MAX_MESSAGE_LEN {
-        return tail;
+    // git names the cause on `fatal:`/`error:`/`remote:` lines and ends with
+    // generic advice, so those lines come first when there are any.
+    let tagged: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| {
+            ["fatal:", "error:", "remote:"]
+                .iter()
+                .any(|p| l.starts_with(p))
+        })
+        .collect();
+    let chosen = if tagged.is_empty() { &lines } else { &tagged };
+    let text = chosen[..chosen.len().min(3)].join(" | ");
+    if text.len() <= MAX_MESSAGE_LEN {
+        return text;
     }
     let mut end = MAX_MESSAGE_LEN;
-    while !tail.is_char_boundary(end) {
+    while !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}…", &tail[..end])
+    format!("{}…", &text[..end])
 }
 
 #[cfg(test)]
@@ -264,8 +276,17 @@ mod tests {
     }
 
     #[test]
-    fn excerpt_keeps_the_last_lines_and_limits_length() {
-        assert_eq!(excerpt("a\n\nb\nc\nd\n"), "b | c | d");
+    fn excerpt_keeps_the_cause_and_limits_length() {
+        let stderr = "fatal: '/x' does not appear to be a git repository\n\
+                      fatal: Could not read from remote repository.\n\n\
+                      Please make sure you have the correct access rights\n\
+                      and the repository exists.\n";
+        assert_eq!(
+            excerpt(stderr),
+            "fatal: '/x' does not appear to be a git repository | \
+             fatal: Could not read from remote repository."
+        );
+        assert_eq!(excerpt("a\n\nb\nc\nd\n"), "a | b | c");
         let long = "ç".repeat(MAX_MESSAGE_LEN);
         let cut = excerpt(&long);
         assert!(cut.ends_with('…'));
