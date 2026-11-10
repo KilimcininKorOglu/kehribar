@@ -2,6 +2,7 @@
 
 pub mod credentials;
 pub mod scheduler;
+pub mod source_scan;
 pub mod worker;
 
 use std::path::PathBuf;

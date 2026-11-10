@@ -101,6 +101,15 @@ pub fn parse_api_url(input: &str) -> Result<Option<String>, UrlError> {
     Ok(Some(url.as_str().trim_end_matches('/').to_owned()))
 }
 
+/// Validates a user, organization or workspace name for a provider API.
+/// `nested` allows a GitLab group path such as `group/sub`. Returns the
+/// name without surrounding blanks and slashes.
+pub fn parse_owner(input: &str, nested: bool) -> Option<String> {
+    let name = input.trim().trim_matches('/');
+    let valid = (nested || !name.contains('/')) && name.split('/').all(is_safe_segment);
+    valid.then(|| name.to_owned())
+}
+
 /// Rejects every URL part other than scheme, host, port and path.
 fn check_parts(url: &Url) -> Result<(), UrlError> {
     if !matches!(url.scheme(), "http" | "https") {
@@ -272,6 +281,23 @@ mod tests {
             parse_api_url("https://t:k@x/api"),
             Err(UrlError::Credentials)
         );
+    }
+
+    #[test]
+    fn owner_names_are_single_segments_unless_nested() {
+        assert_eq!(
+            parse_owner(" octo-org ", false).as_deref(),
+            Some("octo-org")
+        );
+        assert_eq!(
+            parse_owner("/group/sub/", true).as_deref(),
+            Some("group/sub")
+        );
+        for bad in ["", "group/sub", "a b", "..", "a?b", "a%2Fb"] {
+            assert_eq!(parse_owner(bad, false), None, "{bad}");
+        }
+        assert_eq!(parse_owner("group//sub", true), None);
+        assert_eq!(parse_owner("group/../x", true), None);
     }
 
     #[test]

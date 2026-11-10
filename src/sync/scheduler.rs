@@ -1,13 +1,14 @@
 //! Starts due syncs, never more at once than the concurrency setting.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use super::{SyncContext, worker};
+use super::{SyncContext, source_scan, worker};
+use crate::db::sources::{self, Source};
 use crate::db::{repos, unix_now};
 use crate::settings;
 
@@ -19,6 +20,17 @@ pub struct Scheduler {
     ctx: SyncContext,
     running: Arc<AtomicI64>,
     wake: Arc<Notify>,
+    /// Set while the scheduled source scan runs, so scans never overlap.
+    scanning: Arc<AtomicBool>,
+}
+
+/// Clears the scanning flag even when the scan task panics.
+struct ScanGuard(Arc<AtomicBool>);
+
+impl Drop for ScanGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Decrements the running count even when a sync task panics.
@@ -38,6 +50,7 @@ impl Scheduler {
             ctx,
             running: Arc::new(AtomicI64::new(0)),
             wake: Arc::new(Notify::new()),
+            scanning: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -56,6 +69,9 @@ impl Scheduler {
             loop {
                 if let Err(err) = self.tick().await {
                     tracing::error!(%err, "scheduler tick failed");
+                }
+                if let Err(err) = self.scan_sources().await {
+                    tracing::error!(%err, "source scan could not start");
                 }
                 tokio::select! {
                     () = tokio::time::sleep(TICK) => {},
@@ -91,5 +107,41 @@ impl Scheduler {
             }));
         }
         Ok(started)
+    }
+
+    /// Starts one task that scans every watched source whose last scan is
+    /// older than the global sync interval, unless such a task still runs.
+    pub async fn scan_sources(&self) -> sqlx::Result<Option<JoinHandle<()>>> {
+        if self.scanning.swap(true, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let guard = ScanGuard(self.scanning.clone());
+        let settings = settings::effective(&self.ctx.pool, &self.ctx.config).await?;
+        let before = unix_now() - settings.interval_minutes * 60;
+        let due = sources::due_for_scan(&self.ctx.pool, before).await?;
+        if due.is_empty() {
+            return Ok(None);
+        }
+        let this = self.clone();
+        Ok(Some(tokio::spawn(async move {
+            let _guard = guard;
+            for source in due {
+                this.scan_one(&source).await;
+            }
+        })))
+    }
+
+    /// Scans one source now, then wakes the loop for the repositories it added.
+    pub fn scan_now(&self, source: Source) -> JoinHandle<()> {
+        let this = self.clone();
+        tokio::spawn(async move { this.scan_one(&source).await })
+    }
+
+    async fn scan_one(&self, source: &Source) {
+        match source_scan::scan(&self.ctx, source).await {
+            Ok(report) if report.added > 0 => self.wake(),
+            Ok(_) => {}
+            Err(err) => tracing::error!(source = %source.name, %err, "cannot record source scan"),
+        }
     }
 }

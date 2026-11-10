@@ -17,41 +17,61 @@ pub struct Source {
     pub host_id: i64,
     pub kind: SourceKind,
     pub name: String,
+    /// Scheduled scans add the repositories that appeared since the last one.
     pub auto_add: bool,
+    /// Scans import forks too.
+    pub include_forks: bool,
     pub last_scan_at: Option<i64>,
     pub last_error: Option<String>,
     pub created_at: i64,
+}
+
+/// The values a source is created with.
+#[derive(Debug, Clone, Copy)]
+pub struct NewSource<'a> {
+    pub host_id: i64,
+    pub kind: SourceKind,
+    pub name: &'a str,
+    pub auto_add: bool,
+    pub include_forks: bool,
+}
+
+/// The options of a source the user can change later.
+#[derive(Debug, Clone, Copy)]
+pub struct SourceOptions {
+    pub auto_add: bool,
+    pub include_forks: bool,
 }
 
 /// Builds a `SELECT` of every source column at compile time.
 macro_rules! select_sources {
     ($tail:literal) => {
         concat!(
-            "SELECT id, host_id, kind, name, auto_add, last_scan_at, last_error, created_at \
-             FROM sources ",
+            "SELECT id, host_id, kind, name, auto_add, include_forks, last_scan_at, \
+             last_error, created_at FROM sources ",
             $tail
         )
     };
 }
 
+/// Inserts a source. Returns `None` when the host already has a source of
+/// that kind and name.
 pub async fn insert(
     pool: &SqlitePool,
-    host_id: i64,
-    kind: SourceKind,
-    name: &str,
-    auto_add: bool,
+    source: &NewSource<'_>,
     now: i64,
-) -> sqlx::Result<i64> {
+) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar(
-        "INSERT INTO sources (host_id, kind, name, auto_add, created_at) \
-         VALUES (?, ?, ?, ?, ?) RETURNING id",
+        "INSERT INTO sources (host_id, kind, name, auto_add, include_forks, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
     )
-    .bind(host_id)
-    .bind(kind)
-    .bind(name)
-    .bind(auto_add)
+    .bind(source.host_id)
+    .bind(source.kind)
+    .bind(source.name)
+    .bind(source.auto_add)
+    .bind(source.include_forks)
     .bind(now)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
 }
 
@@ -68,16 +88,25 @@ pub async fn list(pool: &SqlitePool) -> sqlx::Result<Vec<Source>> {
         .await
 }
 
-/// Sources whose new repositories are added automatically.
-pub async fn list_auto_add(pool: &SqlitePool) -> sqlx::Result<Vec<Source>> {
-    sqlx::query_as(select_sources!("WHERE auto_add = 1 ORDER BY id"))
-        .fetch_all(pool)
-        .await
+/// Sources with `auto_add` whose last scan started at or before `before`,
+/// or that were never scanned.
+pub async fn due_for_scan(pool: &SqlitePool, before: i64) -> sqlx::Result<Vec<Source>> {
+    sqlx::query_as(select_sources!(
+        "WHERE auto_add = 1 AND (last_scan_at IS NULL OR last_scan_at <= ?) ORDER BY id"
+    ))
+    .bind(before)
+    .fetch_all(pool)
+    .await
 }
 
-pub async fn set_auto_add(pool: &SqlitePool, id: i64, auto_add: bool) -> sqlx::Result<bool> {
-    let result = sqlx::query("UPDATE sources SET auto_add = ? WHERE id = ?")
-        .bind(auto_add)
+pub async fn update_options(
+    pool: &SqlitePool,
+    id: i64,
+    options: SourceOptions,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query("UPDATE sources SET auto_add = ?, include_forks = ? WHERE id = ?")
+        .bind(options.auto_add)
+        .bind(options.include_forks)
         .bind(id)
         .execute(pool)
         .await?;
@@ -100,6 +129,15 @@ pub async fn mark_scanned(
     Ok(())
 }
 
+/// The number of archived repositories each source added, by source id.
+pub async fn repo_counts(pool: &SqlitePool) -> sqlx::Result<Vec<(i64, i64)>> {
+    sqlx::query_as(
+        "SELECT source_id, COUNT(*) FROM repos WHERE source_id IS NOT NULL GROUP BY source_id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// Deletes the source. Its repositories stay in the archive.
 pub async fn delete(pool: &SqlitePool, id: i64) -> sqlx::Result<bool> {
     let result = sqlx::query("DELETE FROM sources WHERE id = ?")
@@ -114,6 +152,7 @@ mod tests {
     use super::*;
     use crate::db::hosts::{self, HostInput, Provider};
     use crate::db::open_in_memory;
+    use crate::db::repos::{self, NewRepo};
 
     async fn pool_with_host() -> (SqlitePool, i64) {
         let pool = open_in_memory().await.unwrap();
@@ -128,46 +167,91 @@ mod tests {
         (pool, host_id)
     }
 
+    fn source(host_id: i64, kind: SourceKind, name: &str) -> NewSource<'_> {
+        NewSource {
+            host_id,
+            kind,
+            name,
+            auto_add: true,
+            include_forks: false,
+        }
+    }
+
     #[tokio::test]
-    async fn scan_state_and_auto_add_are_stored() {
+    async fn scan_state_and_options_are_stored() {
         let (pool, host_id) = pool_with_host().await;
-        let id = insert(&pool, host_id, SourceKind::Org, "forgejo", true, 5)
+        let id = insert(&pool, &source(host_id, SourceKind::Org, "forgejo"), 5)
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(list_auto_add(&pool).await.unwrap().len(), 1);
+        // Never scanned: due at any time.
+        assert_eq!(due_for_scan(&pool, 0).await.unwrap().len(), 1);
 
         mark_scanned(&pool, id, 9, Some("rate limited"))
             .await
             .unwrap();
-        let source = get(&pool, id).await.unwrap().unwrap();
-        assert_eq!(source.last_scan_at, Some(9));
-        assert_eq!(source.last_error.as_deref(), Some("rate limited"));
+        let stored = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(stored.last_scan_at, Some(9));
+        assert_eq!(stored.last_error.as_deref(), Some("rate limited"));
+        assert!(!stored.include_forks);
+        assert!(due_for_scan(&pool, 8).await.unwrap().is_empty());
+        assert_eq!(due_for_scan(&pool, 9).await.unwrap().len(), 1);
 
-        assert!(set_auto_add(&pool, id, false).await.unwrap());
-        assert!(list_auto_add(&pool).await.unwrap().is_empty());
+        let options = SourceOptions {
+            auto_add: false,
+            include_forks: true,
+        };
+        assert!(update_options(&pool, id, options).await.unwrap());
+        let stored = get(&pool, id).await.unwrap().unwrap();
+        assert!(!stored.auto_add && stored.include_forks);
+        // A source without auto_add is never scanned on schedule.
+        assert!(due_for_scan(&pool, 100).await.unwrap().is_empty());
         assert_eq!(list(&pool).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_source_keeps_its_repositories() {
+        let (pool, host_id) = pool_with_host().await;
+        let id = insert(&pool, &source(host_id, SourceKind::User, "alice"), 5)
+            .await
+            .unwrap()
+            .unwrap();
+        let repo = NewRepo {
+            url: "https://codeberg.org/alice/a",
+            host: "codeberg.org",
+            owner: "alice",
+            name: "a",
+            source_id: Some(id),
+            username: None,
+            token_enc: None,
+            interval_minutes: None,
+            wiki_enabled: true,
+        };
+        let repo_id = repos::insert(&pool, &repo, 5).await.unwrap().unwrap();
+        assert_eq!(repo_counts(&pool).await.unwrap(), vec![(id, 1)]);
+
+        assert!(delete(&pool, id).await.unwrap());
+        let kept = repos::get(&pool, repo_id).await.unwrap().unwrap();
+        assert_eq!(kept.source_id, None);
     }
 
     #[tokio::test]
     async fn deleting_the_host_deletes_its_sources() {
         let (pool, host_id) = pool_with_host().await;
-        let id = insert(&pool, host_id, SourceKind::User, "alice", true, 5)
+        let id = insert(&pool, &source(host_id, SourceKind::User, "alice"), 5)
             .await
+            .unwrap()
             .unwrap();
         hosts::delete(&pool, host_id).await.unwrap();
         assert!(get(&pool, id).await.unwrap().is_none());
     }
 
     #[tokio::test]
-    async fn duplicate_source_is_rejected() {
+    async fn duplicate_source_is_ignored() {
         let (pool, host_id) = pool_with_host().await;
-        insert(&pool, host_id, SourceKind::User, "alice", true, 5)
-            .await
-            .unwrap();
-        assert!(
-            insert(&pool, host_id, SourceKind::User, "ALICE", true, 5)
-                .await
-                .is_err()
-        );
+        let first = insert(&pool, &source(host_id, SourceKind::User, "alice"), 5).await;
+        assert!(first.unwrap().is_some());
+        let again = insert(&pool, &source(host_id, SourceKind::User, "ALICE"), 5).await;
+        assert_eq!(again.unwrap(), None);
     }
 }

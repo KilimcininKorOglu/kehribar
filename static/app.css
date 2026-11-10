@@ -350,6 +350,24 @@ textarea:focus {
   border-color: var(--accent-strong);
 }
 
+.btn-small {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.source-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+}
+
+.scan-error {
+  max-width: 28rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
 .btn-danger {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));

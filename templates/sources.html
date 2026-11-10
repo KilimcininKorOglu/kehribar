@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("sources.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ layout.t("sources.title") }}</h1>
+    <p class="muted">{{ layout.t("sources.intro") }}</p>
+  </div>
+</div>
+{% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
+
+<div id="source-table"{% if scanning() %} hx-get="/sources" hx-trigger="every 5s" hx-select="#source-table" hx-swap="outerHTML"{% endif %}>
+{% if rows.is_empty() %}
+<section class="card">
+  <p class="muted">{{ layout.t("sources.empty") }}</p>
+</section>
+{% else %}
+<section class="card table-card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("sources.col_source") }}</th>
+        <th scope="col">{{ layout.t("sources.col_kind") }}</th>
+        <th scope="col" class="num">{{ layout.t("sources.col_repos") }}</th>
+        <th scope="col">{{ layout.t("sources.col_scan") }}</th>
+        <th scope="col">{{ layout.t("sources.col_options") }}</th>
+        <th scope="col"><span class="visually-hidden">{{ layout.t("sources.col_actions") }}</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <strong>{{ row.source.name }}</strong>
+          <div class="muted small">{% if let Some(host) = row.host %}{{ host.host }} · {{ layout.provider_label(host.provider) }}{% endif %}</div>
+        </td>
+        <td>{{ kind_label(row.source.kind) }}</td>
+        <td class="num">{{ row.repos }}</td>
+        <td>
+          {% if let Some(ts) = row.source.last_scan_at %}
+          <time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>
+          {% if let Some(error) = row.source.last_error %}
+          <div><span class="badge badge-error">{{ layout.t("status.error") }}</span></div>
+          <div class="small scan-error">{{ error }}</div>
+          {% endif %}
+          {% else %}
+          <span class="badge badge-syncing">{{ layout.t("sources.scanning_now") }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/sources/{{ row.source.id }}" class="source-options">
+            <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+            <label class="check"><input type="checkbox" name="auto_add" value="1"{% if row.source.auto_add %} checked{% endif %}><span>{{ layout.t("sources.auto_add") }}</span></label>
+            <label class="check"><input type="checkbox" name="include_forks" value="1"{% if row.source.include_forks %} checked{% endif %}><span>{{ layout.t("sources.include_forks") }}</span></label>
+            <button class="btn btn-ghost btn-small" type="submit">{{ layout.t("form.save") }}</button>
+          </form>
+        </td>
+        <td>
+          <div class="actions">
+            <form method="post" action="/sources/{{ row.source.id }}/scan">
+              <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+              <button class="btn btn-small" type="submit">{{ layout.t("sources.scan_now") }}</button>
+            </form>
+            <form method="post" action="/sources/{{ row.source.id }}/delete">
+              <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+              <button class="btn btn-danger btn-small" type="submit">{{ layout.t("sources.delete") }}</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<p class="muted small">{{ layout.t("sources.delete_help") }}</p>
+{% endif %}
+</div>
+
+<section class="card form-card">
+  <h2>{{ layout.t("sources.add") }}</h2>
+  {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+  {% if hosts.is_empty() %}
+  <p class="muted">{{ layout.t("sources.no_hosts") }} <a href="/hosts">{{ layout.t("hosts.add") }}</a></p>
+  {% else %}
+  <form method="post" action="/sources" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("hosts.host") }}</span>
+      <select name="host_id">
+        {% for host in hosts %}
+        <option value="{{ host.id }}"{% if fields.is_host(host.id) %} selected{% endif %}>{{ host.host }} ({{ layout.provider_label(host.provider) }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("sources.col_kind") }}</span>
+      <select name="kind">
+        {% for kind in fields.kinds() %}
+        <option value="{{ kind.code() }}"{% if fields.is_kind(kind) %} selected{% endif %}>{{ kind_label(kind) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("sources.name") }}</span>
+      <input name="name" required value="{{ fields.name }}" placeholder="octo-org" spellcheck="false" autocomplete="off">
+      <small class="muted">{{ layout.t("sources.name_help") }}</small>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="auto_add" value="1"{% if fields.auto_add %} checked{% endif %}>
+      <span>{{ layout.t("sources.auto_add_help") }}</span>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="include_forks" value="1"{% if fields.include_forks %} checked{% endif %}>
+      <span>{{ layout.t("sources.include_forks_help") }}</span>
+    </label>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">{{ layout.t("sources.submit") }}</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

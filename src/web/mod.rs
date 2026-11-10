@@ -13,6 +13,7 @@ pub mod prefs;
 pub mod repos;
 pub mod security;
 pub mod settings_page;
+pub mod sources;
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -104,6 +105,10 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/{id}", get(hosts::show).post(hosts::update))
         .route("/hosts/{id}/delete", post(hosts::delete))
+        .route("/sources", get(sources::list).post(sources::create))
+        .route("/sources/{id}", post(sources::update))
+        .route("/sources/{id}/scan", post(sources::scan))
+        .route("/sources/{id}/delete", post(sources::delete))
         .route(
             "/settings",
             get(settings_page::show).post(settings_page::save),

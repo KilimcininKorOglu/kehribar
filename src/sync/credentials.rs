@@ -37,11 +37,23 @@ pub fn resolve(
     repo: &Repo,
     host: Option<&Host>,
 ) -> Result<Option<Credentials>, String> {
-    let (token, username) = match (source(repo, host), host) {
-        (CredentialSource::Repo, _) => (&repo.token_enc, &repo.username),
-        (CredentialSource::Host, Some(host)) => (&host.token_enc, &host.username),
-        _ => return Ok(None),
-    };
+    match (source(repo, host), host) {
+        (CredentialSource::Repo, _) => decrypt(cipher, &repo.token_enc, &repo.username),
+        (CredentialSource::Host, Some(host)) => for_host(cipher, host),
+        _ => Ok(None),
+    }
+}
+
+/// The default credentials of a host, which also call its API.
+pub fn for_host(cipher: &Cipher, host: &Host) -> Result<Option<Credentials>, String> {
+    decrypt(cipher, &host.token_enc, &host.username)
+}
+
+fn decrypt(
+    cipher: &Cipher,
+    token: &Option<Vec<u8>>,
+    username: &Option<String>,
+) -> Result<Option<Credentials>, String> {
     let Some(token) = token.as_deref() else {
         return Ok(None);
     };

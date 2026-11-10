@@ -1,0 +1,309 @@
+//! Watched sources: the scan adds new repositories, honours the fork
+//! option, keeps repositories that vanish, and the sources page drives it.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod common;
+
+use std::time::Duration;
+
+use axum::http::{StatusCode, header};
+use common::{TestApp, body_text, header_value};
+use git_archive::db::hosts::{self, HostInput, Provider};
+use git_archive::db::repos;
+use git_archive::db::sources::{self, NewSource, Source, SourceKind};
+use git_archive::db::unix_now;
+use serde_json::{Value, json};
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// A GitHub host whose API is the mock server.
+async fn github_host(t: &TestApp, server: &MockServer) -> i64 {
+    let input = HostInput {
+        host: "github.com",
+        provider: Provider::Github,
+        api_base_url: Some(&server.uri()),
+        username: None,
+        token_enc: None,
+    };
+    hosts::insert(&t.state.pool, &input, unix_now())
+        .await
+        .unwrap()
+}
+
+async fn list_answers(server: &MockServer, body: Value) {
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/octo/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+fn repo(url: &str, fork: bool) -> Value {
+    json!({ "clone_url": url, "fork": fork })
+}
+
+async fn add_source(t: &TestApp, host_id: i64, include_forks: bool) -> Source {
+    let new = NewSource {
+        host_id,
+        kind: SourceKind::Org,
+        name: "octo",
+        auto_add: true,
+        include_forks,
+    };
+    let id = sources::insert(&t.state.pool, &new, unix_now())
+        .await
+        .unwrap()
+        .unwrap();
+    sources::get(&t.state.pool, id).await.unwrap().unwrap()
+}
+
+async fn scan(t: &TestApp, id: i64) -> Source {
+    let source = sources::get(&t.state.pool, id).await.unwrap().unwrap();
+    t.state.scheduler.scan_now(source).await.unwrap();
+    sources::get(&t.state.pool, id).await.unwrap().unwrap()
+}
+
+async fn archived_urls(t: &TestApp) -> Vec<String> {
+    let mut urls: Vec<String> = repos::list(&t.state.pool, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.url)
+        .collect();
+    urls.sort();
+    urls
+}
+
+#[tokio::test]
+async fn scan_adds_new_repositories_and_never_removes_any() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source(&t, host_id, false).await;
+
+    list_answers(
+        &server,
+        json!([
+            repo("https://github.com/octo/app.git", false),
+            repo("https://github.com/octo/fork.git", true)
+        ]),
+    )
+    .await;
+    let scanned = scan(&t, source.id).await;
+    assert_eq!(scanned.last_error, None);
+    assert!(scanned.last_scan_at.is_some());
+    // The fork is left out while the option is off.
+    assert_eq!(archived_urls(&t).await, ["https://github.com/octo/app.git"]);
+    let added = &repos::list(&t.state.pool, None).await.unwrap()[0];
+    assert_eq!(added.source_id, Some(source.id));
+    assert!(added.wiki_enabled);
+
+    let options = sources::SourceOptions {
+        auto_add: true,
+        include_forks: true,
+    };
+    sources::update_options(&t.state.pool, source.id, options)
+        .await
+        .unwrap();
+    scan(&t, source.id).await;
+    assert_eq!(
+        archived_urls(&t).await,
+        [
+            "https://github.com/octo/app.git",
+            "https://github.com/octo/fork.git"
+        ]
+    );
+
+    // Both repositories vanish from the provider; the archive keeps them.
+    list_answers(
+        &server,
+        json!([repo("https://github.com/octo/new.git", false)]),
+    )
+    .await;
+    scan(&t, source.id).await;
+    assert_eq!(archived_urls(&t).await.len(), 3);
+}
+
+#[tokio::test]
+async fn repositories_on_another_host_are_reported_not_added() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source(&t, host_id, false).await;
+    list_answers(
+        &server,
+        json!([
+            repo("https://github.com/octo/app.git", false),
+            repo("https://mirror.example/octo/other.git", false),
+            repo("ssh://github.com/octo/ssh.git", false)
+        ]),
+    )
+    .await;
+    let scanned = scan(&t, source.id).await;
+    assert_eq!(archived_urls(&t).await, ["https://github.com/octo/app.git"]);
+    let error = scanned.last_error.unwrap();
+    assert!(error.starts_with("2 repositories skipped"), "{error}");
+    assert!(error.contains("https://mirror.example/octo/other.git"));
+}
+
+#[tokio::test]
+async fn a_provider_error_is_stored_on_the_source() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source(&t, host_id, false).await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let scanned = scan(&t, source.id).await;
+    let error = scanned.last_error.unwrap();
+    assert!(error.contains("HTTP 403"), "{error}");
+    assert!(archived_urls(&t).await.is_empty());
+}
+
+#[tokio::test]
+async fn scheduled_scans_run_once_per_interval() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    add_source(&t, host_id, false).await;
+    list_answers(
+        &server,
+        json!([repo("https://github.com/octo/app.git", false)]),
+    )
+    .await;
+
+    let handle = t.state.scheduler.scan_sources().await.unwrap();
+    handle
+        .expect("a never scanned source is due")
+        .await
+        .unwrap();
+    assert_eq!(archived_urls(&t).await.len(), 1);
+    // Scanned a moment ago: not due again before the global interval.
+    assert!(t.state.scheduler.scan_sources().await.unwrap().is_none());
+}
+
+/// Waits for the background scan the page started.
+async fn wait_for_scan(t: &TestApp) -> Source {
+    for _ in 0..100 {
+        let all = sources::list(&t.state.pool).await.unwrap();
+        if let Some(source) = all.into_iter().find(|s| s.last_scan_at.is_some()) {
+            return source;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the scan did not finish");
+}
+
+#[tokio::test]
+async fn the_sources_page_imports_an_organization() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    list_answers(
+        &server,
+        json!([repo("https://github.com/octo/app.git", false)]),
+    )
+    .await;
+
+    let page = body_text(t.get("/sources").await).await;
+    assert!(
+        page.contains(&format!("<option value=\"{host_id}\"")),
+        "{page}"
+    );
+
+    let form = format!("host_id={host_id}&kind=org&name=octo&auto_add=1");
+    let response = t.post("/sources", &form).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&response, header::LOCATION),
+        "/sources?notice=added"
+    );
+    let source = wait_for_scan(&t).await;
+    assert!(source.auto_add && !source.include_forks);
+    assert_eq!(archived_urls(&t).await, ["https://github.com/octo/app.git"]);
+
+    let page = body_text(t.get("/sources?notice=added").await).await;
+    assert!(page.contains("Kaynak eklendi."));
+    assert!(page.contains("<strong>octo</strong>"));
+
+    // The same source twice is refused.
+    let again = t.post("/sources", &form).await;
+    assert_eq!(again.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_text(again).await.contains("Bu kaynak zaten listede."));
+
+    // Options and deletion; the repository stays.
+    let saved = t
+        .post(&format!("/sources/{}", source.id), "include_forks=1")
+        .await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let stored = sources::get(&t.state.pool, source.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!stored.auto_add && stored.include_forks);
+    let deleted = t.post(&format!("/sources/{}/delete", source.id), "").await;
+    assert_eq!(deleted.status(), StatusCode::SEE_OTHER);
+    assert!(sources::list(&t.state.pool).await.unwrap().is_empty());
+    assert_eq!(archived_urls(&t).await.len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_source_forms_are_rejected() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let github = github_host(&t, &server).await;
+    let generic = hosts::insert(
+        &t.state.pool,
+        &HostInput {
+            host: "git.example",
+            provider: Provider::Generic,
+            api_base_url: None,
+            username: None,
+            token_enc: None,
+        },
+        unix_now(),
+    )
+    .await
+    .unwrap();
+    let cases = [
+        (
+            format!("host_id={generic}&kind=org&name=octo"),
+            "Listeden bir host seçin.",
+        ),
+        (
+            "host_id=999&kind=org&name=octo".to_owned(),
+            "Listeden bir host seçin.",
+        ),
+        (
+            format!("host_id={github}&kind=team&name=octo"),
+            "Listeden bir tür seçin.",
+        ),
+        (
+            format!("host_id={github}&kind=org&name=a%2Fb"),
+            "Yalnız bir GitLab grubu",
+        ),
+        (
+            format!("host_id={github}&kind=org&name=%3Cscript%3E"),
+            "Harf, rakam",
+        ),
+    ];
+    for (form, message) in cases {
+        let response = t.post("/sources", &form).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{form}"
+        );
+        let page = body_text(response).await;
+        assert!(page.contains(message), "{form}: {page}");
+        assert!(!page.contains("<script>"));
+    }
+    assert!(sources::list(&t.state.pool).await.unwrap().is_empty());
+    // The generic host is not offered.
+    let page = body_text(t.get("/sources").await).await;
+    assert!(!page.contains(&format!("<option value=\"{generic}\"")));
+}
