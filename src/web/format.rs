@@ -18,18 +18,33 @@ pub fn absolute(ts: i64) -> String {
         .unwrap_or_default()
 }
 
+/// `2026-11-10` (UTC).
+pub fn date(ts: i64) -> String {
+    OffsetDateTime::from_unix_timestamp(ts)
+        .ok()
+        .and_then(|t| t.format(format_description!("[year]-[month]-[day]")).ok())
+        .unwrap_or_default()
+}
+
 /// Steps of the relative time text: the limit in seconds, the unit in
 /// seconds, and the past and future message keys.
 const RELATIVE_STEPS: [(i64, i64, &str, &str); 3] = [
     (3_600, 60, "time.minutes_ago", "time.in_minutes"),
     (86_400, 3_600, "time.hours_ago", "time.in_hours"),
-    (i64::MAX, 86_400, "time.days_ago", "time.in_days"),
+    (RELATIVE_LIMIT, 86_400, "time.days_ago", "time.in_days"),
 ];
 
-/// `5 dk önce` / `in 2 h`, relative to `now`.
+/// From this distance on, a date reads better than a count of days.
+const RELATIVE_LIMIT: i64 = 30 * 86_400;
+
+/// `5 dk önce` / `in 2 h`, relative to `now`; a date when it is a month
+/// or more away.
 pub fn relative(tr: &Tr, now: i64, ts: i64) -> String {
     let diff = now - ts;
     let distance = diff.saturating_abs();
+    if distance >= RELATIVE_LIMIT {
+        return date(ts);
+    }
     if distance < 60 {
         let key = if diff >= 0 {
             "time.just_now"
@@ -109,6 +124,12 @@ mod tests {
         assert_eq!(relative(&tr, now, now - 3 * 86_400), "3 days ago");
         assert_eq!(relative(&tr, now, now + 3_600 * 5), "in 5 h");
         assert_eq!(relative(&tr, now, now + 10), "soon");
+        assert_eq!(relative(&tr, now, now - 29 * 86_400), "29 days ago");
+        // 1_700_000_000 is 2023-11-14; a month or more shows the date.
+        assert_eq!(
+            relative(&tr, 1_700_000_000 + 31 * 86_400, 1_700_000_000),
+            "2023-11-14"
+        );
     }
 
     #[test]
