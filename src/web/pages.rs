@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::auth::CurrentSession;
 use super::prefs::{Prefs, Theme};
-use super::{AppState, format};
+use super::{AppState, format, highlight};
 use crate::db::hosts::Provider;
 use crate::db::repos::RepoStatus;
 use crate::db::unix_now;
@@ -28,6 +28,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         .chain_update(APP_CSS)
         .chain_update(HTMX_JS)
         .chain_update(FAVICON_SVG)
+        .chain_update(highlight::CSS.as_str())
         .finalize();
     digest.iter().take(6).map(|b| format!("{b:02x}")).collect()
 });
@@ -209,6 +210,7 @@ pub async fn static_file(Path(file): Path<String>) -> Response {
         "app.css" => (APP_CSS, "text/css; charset=utf-8"),
         "htmx.min.js" => (HTMX_JS, "text/javascript; charset=utf-8"),
         "favicon.svg" => (FAVICON_SVG, "image/svg+xml"),
+        "highlight.css" => (highlight::CSS.as_str(), "text/css; charset=utf-8"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     (

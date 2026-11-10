@@ -194,6 +194,8 @@ struct DetailPage {
     /// The host entry of this repository, when there is one.
     host: Option<Host>,
     credential_source: CredentialSource,
+    /// The active tab of `repo_tabs.html`.
+    tab: &'static str,
 }
 
 impl DetailPage {
@@ -254,6 +256,7 @@ async fn detail_page(
         error,
         host,
         credential_source,
+        tab: "overview",
     })
 }
 

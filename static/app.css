@@ -622,6 +622,294 @@ textarea:focus {
   font-weight: 550;
 }
 
+/* Repository pages */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 1.25rem;
+}
+
+.tabs a {
+  padding: 0.55rem 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+
+.tabs a:hover {
+  color: var(--text);
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+a.plain {
+  color: inherit;
+  text-decoration: none;
+}
+
+.rev-chip {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.path-crumbs {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.files td:first-child {
+  word-break: break-all;
+}
+
+.entry-dir {
+  font-weight: 600;
+}
+
+.file-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.file-card + .file-card,
+.file-card + p {
+  margin-top: 1rem;
+}
+
+.file-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.file-note {
+  padding: 1rem;
+  margin: 0;
+}
+
+.code-view {
+  display: flex;
+  overflow-x: auto;
+}
+
+.code-view pre,
+.blame pre,
+pre.diff {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.gutter {
+  flex: none;
+  padding: 0.75rem 0.6rem 0.75rem 1rem;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+
+.gutter a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.gutter a:target {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.code-view .code {
+  flex: 1;
+  padding: 0.75rem 1rem;
+}
+
+.image-view {
+  padding: 1rem;
+  text-align: center;
+  background: var(--surface-2);
+}
+
+.image-view img {
+  max-width: 100%;
+  height: auto;
+}
+
+.readme {
+  margin-top: 1.25rem;
+}
+
+.markdown {
+  overflow-wrap: anywhere;
+}
+
+.markdown img {
+  max-width: 100%;
+}
+
+.markdown pre {
+  overflow-x: auto;
+}
+
+.markdown table {
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.6rem;
+}
+
+.blame {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.blame td {
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.blame-info {
+  width: 16rem;
+  min-width: 12rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.blame-summary {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 15rem;
+}
+
+.blame-lines {
+  width: 1%;
+}
+
+.blame-lines .gutter {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.blame-code pre {
+  padding: 0.5rem 1rem;
+}
+
+.commit-subject {
+  word-break: break-word;
+}
+
+.commit-title {
+  margin: 0 0 0.75rem;
+  word-break: break-word;
+}
+
+.commit-body {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.commit-card .facts {
+  margin-bottom: 1rem;
+}
+
+.commit-card + p {
+  margin-top: 1.25rem;
+}
+
+pre.diff {
+  overflow-x: auto;
+}
+
+.dl {
+  display: block;
+  min-height: 1.5em;
+  padding: 0 1rem 0 2rem;
+  position: relative;
+  white-space: pre;
+}
+
+.dl::before {
+  position: absolute;
+  left: 0.75rem;
+  color: var(--muted);
+}
+
+.dl-add {
+  background: var(--ok-soft);
+}
+
+.dl-add::before {
+  content: "+";
+}
+
+.dl-del {
+  background: var(--danger-soft);
+}
+
+.dl-del::before {
+  content: "-";
+}
+
+.dl-hunk {
+  background: var(--accent-soft);
+  color: var(--muted);
+  padding-left: 1rem;
+}
+
+.diff-stat-add {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.diff-stat-del {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pager {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.ref-section + .ref-section {
+  margin-top: 1.25rem;
+}
+
+.ref-section h2 {
+  padding: 1rem 1rem 0;
+}
+
+.ref-help {
+  padding: 0 1rem;
+}
+
 @media (max-width: 720px) {
   .topbar-inner {
     gap: 0.75rem;

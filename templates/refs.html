@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("browse.refs") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+{% include "browse_head.html" %}
+{% if refs.is_empty() %}
+<section class="card"><p class="muted">{{ layout.t("browse.empty") }}</p></section>
+{% endif %}
+{% for (kind, title_key) in sections() %}
+{% let list = of_kind(kind) %}
+{% if !list.is_empty() %}
+<section class="card table-card ref-section">
+  <h2>{{ layout.t(title_key) }}</h2>
+  {% if kind == "rescued" %}<p class="muted small ref-help">{{ layout.t("browse.rescued_help") }}</p>{% endif %}
+  <table class="table">
+    <tbody>
+      {% for entry in list %}
+      <tr>
+        <td><a class="mono" href="{{ view.rev_tree_url(entry.name) }}">{{ entry.short }}</a>{% if is_default(entry) %} <span class="badge badge-ok">{{ layout.t("browse.default_branch") }}</span>{% endif %}</td>
+        <td class="small commit-subject">{{ entry.subject }}</td>
+        <td class="small"><time title="{{ layout.absolute(entry.time) }}">{{ layout.ago(entry.time) }}</time></td>
+        <td><a class="mono small" href="{{ view.commit_url(entry.commit) }}">{{ view.short(entry.commit) }}</a></td>
+        <td><a class="small" href="{{ view.rev_commits_url(entry.name) }}">{{ layout.t("browse.history") }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endfor %}
+{% endblock %}

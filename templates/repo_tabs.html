@@ -1,0 +1,6 @@
+<nav class="tabs" aria-label="{{ layout.t("browse.tabs") }}">
+  <a href="/repos/{{ repo.id }}" aria-current="{% if tab == "overview" %}page{% else %}false{% endif %}">{{ layout.t("browse.overview") }}</a>
+  <a href="/repos/{{ repo.id }}/tree" aria-current="{% if tab == "files" %}page{% else %}false{% endif %}">{{ layout.t("browse.files") }}</a>
+  <a href="/repos/{{ repo.id }}/commits" aria-current="{% if tab == "commits" %}page{% else %}false{% endif %}">{{ layout.t("browse.commits") }}</a>
+  <a href="/repos/{{ repo.id }}/refs" aria-current="{% if tab == "refs" %}page{% else %}false{% endif %}">{{ layout.t("browse.refs") }}</a>
+</nav>

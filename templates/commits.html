@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("browse.commits") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+{% include "browse_head.html" %}
+<form class="search" method="get" action="/repos/{{ repo.id }}/commits" role="search">
+  {% if !view.is_default %}<input type="hidden" name="ref" value="{{ view.rev }}">{% endif %}
+  <label class="visually-hidden" for="commit-search">{{ layout.t("browse.search") }}</label>
+  <input id="commit-search" type="search" name="q" value="{{ search }}" placeholder="{{ layout.t("browse.search") }}">
+</form>
+{% if commits.is_empty() %}
+<section class="card"><p class="muted">{% if view.commit.is_none() %}{{ layout.t("browse.empty") }}{% else %}{{ layout.t("browse.no_commits") }}{% endif %}</p></section>
+{% else %}
+<section class="card table-card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("browse.col_message") }}</th>
+        <th scope="col">{{ layout.t("browse.col_author") }}</th>
+        <th scope="col">{{ layout.t("browse.col_date") }}</th>
+        <th scope="col">{{ layout.t("browse.col_commit") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for commit in commits %}
+      <tr>
+        <td class="commit-subject"><a href="{{ view.commit_url(commit.sha) }}">{{ commit.subject }}</a></td>
+        <td class="small">{{ commit.author }}</td>
+        <td class="small"><time title="{{ layout.absolute(commit.time) }}">{{ layout.ago(commit.time) }}</time></td>
+        <td><a class="mono small" href="{{ view.commit_url(commit.sha) }}">{{ view.short(commit.sha) }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% if page > 1 || has_next %}
+<nav class="pager" aria-label="{{ layout.t("browse.pages") }}">
+  {% if page > 1 %}<a class="btn btn-sm" href="{{ page_url(previous_page()) }}">{{ layout.t("browse.newer") }}</a>{% endif %}
+  {% if has_next %}<a class="btn btn-sm" href="{{ page_url(next_page()) }}">{{ layout.t("browse.older") }}</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

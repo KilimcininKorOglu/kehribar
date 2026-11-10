@@ -37,6 +37,12 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+impl From<crate::git::GitError> for AppError {
+    fn from(err: crate::git::GitError) -> Self {
+        Self::internal(err)
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = self.status();

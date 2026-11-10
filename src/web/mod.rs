@@ -1,9 +1,12 @@
 //! HTTP routing and shared request state.
 
 pub mod auth;
+pub mod browse;
 pub mod form;
 pub mod format;
+pub mod highlight;
 pub mod hosts;
+pub mod markdown;
 pub mod pages;
 pub mod prefs;
 pub mod repos;
@@ -88,6 +91,13 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/sync", post(repos::sync_now))
         .route("/repos/{id}/settings", post(repos::update))
         .route("/repos/{id}/credentials", post(repos::update_credentials))
+        .route("/repos/{id}/tree", get(browse::tree))
+        .route("/repos/{id}/blob", get(browse::blob))
+        .route("/repos/{id}/raw", get(browse::raw))
+        .route("/repos/{id}/blame", get(browse::blame))
+        .route("/repos/{id}/commits", get(browse::commits))
+        .route("/repos/{id}/commit/{sha}", get(browse::commit))
+        .route("/repos/{id}/refs", get(browse::refs))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/{id}", get(hosts::show).post(hosts::update))

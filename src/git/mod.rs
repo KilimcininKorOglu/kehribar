@@ -2,5 +2,6 @@
 
 pub mod command;
 pub mod mirror;
+pub mod read;
 
 pub use command::{Credentials, Git, GitError, GitErrorKind};

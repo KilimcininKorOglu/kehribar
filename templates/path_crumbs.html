@@ -1,0 +1,1 @@
+<nav class="path-crumbs mono" aria-label="{{ layout.t("browse.path") }}"><a href="{{ view.tree_url("") }}">{{ repo.name }}</a>{% for (name, url) in view.crumbs(path) %} / <a href="{{ url }}">{{ name }}</a>{% endfor %}</nav>

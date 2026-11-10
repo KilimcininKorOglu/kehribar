@@ -4,11 +4,12 @@
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
-use std::process::{Output, Stdio};
+use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::process::Command;
+use tokio::io::AsyncReadExt;
+use tokio::process::{Child, ChildStdout, Command};
 
 /// Environment variables the credential helper reads. Their values reach
 /// only the `git` child process, never its arguments.
@@ -59,6 +60,17 @@ pub struct GitError {
     pub message: String,
 }
 
+impl GitError {
+    /// An error raised before or around git, which has no exit code.
+    fn local(kind: GitErrorKind, message: String) -> Self {
+        Self {
+            kind,
+            exit_code: None,
+            message,
+        }
+    }
+}
+
 /// Runs `git` commands with one timeout.
 #[derive(Debug, Clone)]
 pub struct Git {
@@ -92,12 +104,51 @@ impl Git {
         if output.status.success() {
             return Ok(output.stdout);
         }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(GitError {
-            kind: classify(&stderr, credentials.is_some()),
-            exit_code: output.status.code(),
-            message: format!("git {name}: {}", excerpt(&stderr)),
-        })
+        Err(failure(&name, &output.stderr, output.status, credentials))
+    }
+
+    /// Runs `git <args>` in `dir` and keeps at most `limit` bytes of its
+    /// standard output. The flag is `true` when the output was cut; the
+    /// process is stopped then, so a huge diff or file never fills memory.
+    pub async fn run_capped(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        limit: usize,
+    ) -> Result<(Vec<u8>, bool), GitError> {
+        let name = args.first().copied().unwrap_or_default().to_owned();
+        let mut command = self.command(Some(dir), None);
+        command.args(args);
+        let child = command.spawn().map_err(spawn_error)?;
+        match tokio::time::timeout(self.timeout, read_capped(child, limit)).await {
+            Ok(Ok(capped)) if capped.cut || capped.status.success() => {
+                Ok((capped.stdout, capped.cut))
+            }
+            Ok(Ok(capped)) => Err(failure(&name, &capped.stderr, capped.status, None)),
+            Ok(Err(err)) => Err(io_error(&name, &err)),
+            Err(_) => Err(self.timeout_error(&name)),
+        }
+    }
+
+    /// Starts `git <args>` in `dir` and returns its standard output to be
+    /// streamed. No timeout applies, as a download takes as long as the
+    /// client reads; when the reader is dropped, git ends on the closed pipe.
+    /// Call it only after a check that the command will succeed.
+    pub fn spawn_stdout(&self, dir: &Path, args: &[&str]) -> Result<ChildStdout, GitError> {
+        let mut command = self.command(Some(dir), None);
+        command.args(args).stderr(Stdio::null());
+        let mut child = command.spawn().map_err(spawn_error)?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            GitError::local(GitErrorKind::Spawn, "git has no standard output".to_owned())
+        })?;
+        // The task owns the child, so kill_on_drop does not stop it early,
+        // and reaps it when it exits.
+        tokio::spawn(async move {
+            if let Err(err) = child.wait().await {
+                tracing::warn!(%err, "streamed git process failed");
+            }
+        });
+        Ok(stdout)
     }
 
     fn command(&self, dir: Option<&Path>, credentials: Option<&Credentials>) -> Command {
@@ -128,25 +179,80 @@ impl Git {
     }
 
     async fn wait(&self, mut command: Command, name: &str) -> Result<Output, GitError> {
-        let child = command.spawn().map_err(|err| GitError {
-            kind: GitErrorKind::Spawn,
-            exit_code: None,
-            message: format!("cannot start git: {err}"),
-        })?;
+        let child = command.spawn().map_err(spawn_error)?;
         // kill_on_drop stops the process when the timeout drops the future.
         match tokio::time::timeout(self.timeout, child.wait_with_output()).await {
             Ok(Ok(output)) => Ok(output),
-            Ok(Err(err)) => Err(GitError {
-                kind: GitErrorKind::Other,
-                exit_code: None,
-                message: format!("git {name}: {err}"),
-            }),
-            Err(_) => Err(GitError {
-                kind: GitErrorKind::Timeout,
-                exit_code: None,
-                message: format!("git {name}: timed out after {}s", self.timeout.as_secs()),
-            }),
+            Ok(Err(err)) => Err(io_error(name, &err)),
+            Err(_) => Err(self.timeout_error(name)),
         }
+    }
+
+    fn timeout_error(&self, name: &str) -> GitError {
+        let message = format!("git {name}: timed out after {}s", self.timeout.as_secs());
+        GitError::local(GitErrorKind::Timeout, message)
+    }
+}
+
+/// Output of [`Git::run_capped`] before it is checked.
+struct Capped {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    cut: bool,
+    status: ExitStatus,
+}
+
+async fn read_capped(mut child: Child, limit: usize) -> std::io::Result<Capped> {
+    // stderr is read on its own task, so a full stderr pipe never blocks
+    // git while stdout is read here.
+    let stderr = child.stderr.take();
+    let read_err = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut err) = stderr {
+            err.read_to_end(&mut buf).await?;
+        }
+        Ok::<_, std::io::Error>(buf)
+    });
+    let mut stdout = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        let max = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
+        out.take(max).read_to_end(&mut stdout).await?;
+    }
+    let cut = stdout.len() > limit;
+    if cut {
+        // git would wait for a reader forever; stop it.
+        stdout.truncate(limit);
+        child.start_kill()?;
+    }
+    let stderr = read_err.await.map_err(std::io::Error::other)??;
+    let status = child.wait().await?;
+    Ok(Capped {
+        stdout,
+        stderr,
+        cut,
+        status,
+    })
+}
+
+fn spawn_error(err: std::io::Error) -> GitError {
+    GitError::local(GitErrorKind::Spawn, format!("cannot start git: {err}"))
+}
+
+fn io_error(name: &str, err: &std::io::Error) -> GitError {
+    GitError::local(GitErrorKind::Other, format!("git {name}: {err}"))
+}
+
+fn failure(
+    name: &str,
+    stderr: &[u8],
+    status: ExitStatus,
+    credentials: Option<&Credentials>,
+) -> GitError {
+    let stderr = String::from_utf8_lossy(stderr);
+    GitError {
+        kind: classify(&stderr, credentials.is_some()),
+        exit_code: status.code(),
+        message: format!("git {name}: {}", excerpt(&stderr)),
     }
 }
 
@@ -333,6 +439,32 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind, GitErrorKind::Timeout);
+    }
+
+    #[tokio::test]
+    async fn capped_output_is_cut_and_the_process_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        git()
+            .run(Some(path), ["init", "--quiet"], None)
+            .await
+            .unwrap();
+        // `git help -a` writes several kilobytes to stdout.
+        let (full, cut) = git()
+            .run_capped(path, &["help", "-a"], usize::MAX >> 1)
+            .await
+            .unwrap();
+        assert!(!cut && full.len() > 1000);
+        let (part, cut) = git().run_capped(path, &["help", "-a"], 100).await.unwrap();
+        assert!(cut);
+        assert_eq!(part, full[..100]);
+
+        let err = git()
+            .run_capped(path, &["cat-file", "-t", "nope"], 100)
+            .await
+            .unwrap_err();
+        assert_eq!(err.exit_code, Some(128));
+        assert!(err.message.starts_with("git cat-file: "), "{}", err.message);
     }
 
     #[test]

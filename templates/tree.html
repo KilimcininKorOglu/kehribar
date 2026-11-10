@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+{% include "browse_head.html" %}
+{% if view.commit.is_none() %}
+<section class="card"><p class="muted">{{ layout.t("browse.empty") }}</p></section>
+{% else %}
+{% include "path_crumbs.html" %}
+<section class="card table-card">
+  <table class="table files">
+    <tbody>
+      {% if !path.is_empty() %}
+      <tr><td colspan="2"><a href="{{ view.tree_url(parent()) }}">..</a></td></tr>
+      {% endif %}
+      {% for entry in entries %}
+      <tr>
+        <td>
+          {% match entry.kind %}
+          {% when EntryKind::Tree %}<a class="entry-dir" href="{{ view.tree_url(entry.path) }}">{{ entry.name }}/</a>
+          {% when EntryKind::Blob %}<a href="{{ view.blob_url(entry.path) }}">{{ entry.name }}</a>{% if entry.symlink %} <span class="badge">{{ layout.t("browse.symlink") }}</span>{% endif %}
+          {% when EntryKind::Submodule %}{{ entry.name }} <span class="badge">{{ layout.t("browse.submodule") }}</span>
+          {% endmatch %}
+        </td>
+        <td class="num muted small">{% if let Some(size) = entry.size %}{{ size_text(size) }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% if let Some(readme) = readme %}
+<section class="card readme">
+  <h2 class="mono small">{{ readme.name }}</h2>
+  <div class="markdown">{{ readme.html|safe }}</div>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

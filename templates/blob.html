@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}{{ path }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+{% include "browse_head.html" %}
+{% include "path_crumbs.html" %}
+<section class="card file-card">
+  <div class="file-head">
+    <span class="muted small">{{ size_text() }}{% if code.is_some() %} · {{ lines_text() }}{% endif %}</span>
+    <div class="actions">
+      <a class="btn btn-sm" href="{{ view.raw_url(path) }}">{{ layout.t("browse.raw") }}</a>
+      {% if code.is_some() %}<a class="btn btn-sm" href="{{ view.blame_url(path) }}">{{ layout.t("browse.blame") }}</a>{% endif %}
+    </div>
+  </div>
+  {% if let Some(code) = code %}
+  <div class="code-view">
+    <pre class="gutter" aria-hidden="true">{% for n in line_numbers() %}<a id="L{{ n }}" href="#L{{ n }}">{{ n }}</a>
+{% endfor %}</pre>
+    <pre class="code"><code>{{ code|safe }}</code></pre>
+  </div>
+  {% else if is_image %}
+  <div class="image-view"><img src="{{ view.raw_url(path) }}" alt="{{ path }}"></div>
+  {% else if too_large %}
+  <p class="file-note muted">{{ layout.t("browse.too_large") }}</p>
+  {% else %}
+  <p class="file-note muted">{{ layout.t("browse.binary") }}</p>
+  {% endif %}
+</section>
+{% endblock %}

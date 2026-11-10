@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("browse.blame") }} · {{ path }}{% endblock %}
+
+{% block content %}
+{% include "browse_head.html" %}
+{% include "path_crumbs.html" %}
+<section class="card file-card">
+  <div class="file-head">
+    <span class="muted small">{{ layout.t("browse.blame") }}</span>
+    <div class="actions"><a class="btn btn-sm" href="{{ view.blob_url(path) }}">{{ layout.t("browse.file") }}</a></div>
+  </div>
+  {% if let Some(blame) = blame %}
+  <div class="table-scroll">
+    <table class="blame">
+      <tbody>
+        {% for chunk in blame.chunks %}
+        <tr>
+          <td class="blame-info">
+            {% if let Some(info) = commit_info(chunk.sha) %}
+            <a class="mono" href="{{ view.commit_url(chunk.sha) }}">{{ view.short(chunk.sha) }}</a>
+            <span>{{ info.author }}</span>
+            <time class="muted small" title="{{ layout.absolute(info.time) }}">{{ layout.ago(info.time) }}</time>
+            <div class="small blame-summary">{{ info.summary }}</div>
+            {% endif %}
+          </td>
+          <td class="blame-lines"><pre class="gutter" aria-hidden="true">{% for n in line_range(chunk) %}{{ n }}
+{% endfor %}</pre></td>
+          <td class="blame-code"><pre class="code">{% for line in chunk.lines %}{{ line }}
+{% endfor %}</pre></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="file-note muted">{{ layout.t("browse.no_blame") }}</p>
+  {% endif %}
+</section>
+{% endblock %}
