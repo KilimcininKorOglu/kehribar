@@ -9,5 +9,6 @@ pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod error;
+pub mod git;
 pub mod i18n;
 pub mod web;
