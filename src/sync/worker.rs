@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::{SyncContext, credentials};
+use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
 use crate::db::sync_runs::{self, RunResult};
 use crate::db::unix_now;
@@ -49,7 +50,15 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         u64::try_from(settings.git_timeout_seconds).unwrap_or(u64::MAX),
     ));
     let dir = ctx.repo_dir(repo);
-    let result = mirror_repo(ctx, &git, repo, &dir, started).await;
+    let host = hosts::find_by_host(&ctx.pool, &repo.host).await?;
+    let job = Job {
+        git: &git,
+        repo,
+        host: host.as_ref(),
+        dir: &dir,
+        now: started,
+    };
+    let result = mirror_repo(ctx, &job).await;
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
     let size_bytes = archive_size(&dir).await;
@@ -79,36 +88,44 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     sync_runs::finish(&ctx.pool, run_id, &run).await
 }
 
-async fn mirror_repo(
-    ctx: &SyncContext,
-    git: &Git,
-    repo: &Repo,
-    dir: &Path,
+/// The inputs of the Git work of one sync.
+struct Job<'a> {
+    git: &'a Git,
+    repo: &'a Repo,
+    host: Option<&'a Host>,
+    dir: &'a Path,
     now: i64,
-) -> Result<Mirrored, Failure> {
-    let credentials = credentials::for_repo(&ctx.cipher, repo).map_err(|message| Failure {
-        status: RepoStatus::Error,
-        message,
-    })?;
-    let report = mirror::sync(git, &repo.url, dir, credentials.as_ref(), now).await?;
-    let has_wiki = if repo.wiki_enabled {
-        mirror_wiki(git, repo, dir, credentials.as_ref(), now).await?
+}
+
+impl Job<'_> {
+    /// Bitbucket serves the wiki under `<repo>.git/wiki`; every other
+    /// server under `<repo>.wiki.git`.
+    fn is_bitbucket(&self) -> bool {
+        self.host.is_some_and(|h| h.provider == Provider::Bitbucket)
+            || self.repo.host.eq_ignore_ascii_case("bitbucket.org")
+    }
+}
+
+async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failure> {
+    let credentials =
+        credentials::resolve(&ctx.cipher, job.repo, job.host).map_err(|message| Failure {
+            status: RepoStatus::Error,
+            message,
+        })?;
+    let credentials = credentials.as_ref();
+    let report = mirror::sync(job.git, &job.repo.url, job.dir, credentials, job.now).await?;
+    let has_wiki = if job.repo.wiki_enabled {
+        mirror_wiki(job, credentials).await?
     } else {
         false
     };
     Ok(Mirrored { report, has_wiki })
 }
 
-async fn mirror_wiki(
-    git: &Git,
-    repo: &Repo,
-    dir: &Path,
-    credentials: Option<&Credentials>,
-    now: i64,
-) -> Result<bool, Failure> {
-    let bitbucket = repo.host.eq_ignore_ascii_case("bitbucket.org");
-    let url = mirror::wiki_url(&repo.url, bitbucket);
-    let wiki = mirror::sync_wiki(git, &url, &mirror::wiki_dir(dir), credentials, now)
+async fn mirror_wiki(job: &Job<'_>, credentials: Option<&Credentials>) -> Result<bool, Failure> {
+    let url = mirror::wiki_url(&job.repo.url, job.is_bitbucket());
+    let wiki_dir = mirror::wiki_dir(job.dir);
+    let wiki = mirror::sync_wiki(job.git, &url, &wiki_dir, credentials, job.now)
         .await
         .map_err(|err| Failure {
             // The repository itself is fine; only the wiki failed.

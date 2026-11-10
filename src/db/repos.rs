@@ -54,12 +54,9 @@ pub struct NewRepo<'a> {
     pub wiki_enabled: bool,
 }
 
-/// The per-repository settings the user can edit.
-#[derive(Debug, Clone)]
-pub struct RepoSettings<'a> {
-    pub username: Option<&'a str>,
-    /// `Some` replaces the stored token; `None` keeps it.
-    pub token_enc: Option<&'a [u8]>,
+/// The per-repository sync settings the user can edit.
+#[derive(Debug, Clone, Copy)]
+pub struct RepoSettings {
     pub interval_minutes: Option<i64>,
     pub wiki_enabled: bool,
 }
@@ -204,16 +201,31 @@ pub async fn schedule_now(pool: &SqlitePool, id: i64, now: i64) -> sqlx::Result<
 pub async fn update_settings(
     pool: &SqlitePool,
     id: i64,
-    settings: &RepoSettings<'_>,
+    settings: RepoSettings,
+) -> sqlx::Result<bool> {
+    let result =
+        sqlx::query("UPDATE repos SET interval_minutes = ?, wiki_enabled = ? WHERE id = ?")
+            .bind(settings.interval_minutes)
+            .bind(settings.wiki_enabled)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Sets the username. `token_enc` replaces the stored token only when it is
+/// `Some`; [`clear_token`] removes it.
+pub async fn update_credentials(
+    pool: &SqlitePool,
+    id: i64,
+    username: Option<&str>,
+    token_enc: Option<&[u8]>,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query(
-        "UPDATE repos SET username = ?, token_enc = COALESCE(?, token_enc), \
-         interval_minutes = ?, wiki_enabled = ? WHERE id = ?",
+        "UPDATE repos SET username = ?, token_enc = COALESCE(?, token_enc) WHERE id = ?",
     )
-    .bind(settings.username)
-    .bind(settings.token_enc)
-    .bind(settings.interval_minutes)
-    .bind(settings.wiki_enabled)
+    .bind(username)
+    .bind(token_enc)
     .bind(id)
     .execute(pool)
     .await?;
@@ -382,17 +394,33 @@ mod tests {
         repo.token_enc = Some(b"old");
         let id = insert(&pool, &repo, 1).await.unwrap().unwrap();
 
-        let keep = RepoSettings {
-            username: Some("bot"),
-            token_enc: None,
+        let settings = RepoSettings {
             interval_minutes: Some(30),
             wiki_enabled: false,
         };
-        assert!(update_settings(&pool, id, &keep).await.unwrap());
+        assert!(update_settings(&pool, id, settings).await.unwrap());
         let stored = get(&pool, id).await.unwrap().unwrap();
         assert_eq!(stored.token_enc.as_deref(), Some(&b"old"[..]));
         assert_eq!(stored.interval_minutes, Some(30));
         assert!(!stored.wiki_enabled);
+
+        // A credential update without a token keeps the stored one.
+        assert!(
+            update_credentials(&pool, id, Some("bot"), None)
+                .await
+                .unwrap()
+        );
+        let stored = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(stored.username.as_deref(), Some("bot"));
+        assert_eq!(stored.token_enc.as_deref(), Some(&b"old"[..]));
+        assert!(
+            update_credentials(&pool, id, None, Some(b"new"))
+                .await
+                .unwrap()
+        );
+        let stored = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(stored.username, None);
+        assert_eq!(stored.token_enc.as_deref(), Some(&b"new"[..]));
 
         assert!(clear_token(&pool, id).await.unwrap());
         assert!(get(&pool, id).await.unwrap().unwrap().token_enc.is_none());

@@ -85,17 +85,44 @@
     </form>
   </section>
 
-  <section class="card danger-zone">
-    <h2>{{ layout.t("repo.delete") }}</h2>
-    <p class="muted">{{ layout.t("repo.delete_help") }}</p>
-    <form method="post" action="/repos/{{ repo.id }}/delete" class="stack">
+  <section class="card">
+    <h2>{{ layout.t("cred.title") }}</h2>
+    <p class="muted">{{ credential_text() }}
+      {% if let Some(host) = host %}<a href="/hosts/{{ host.id }}">{{ layout.t("cred.host_link") }}</a>{% else %}<a href="/hosts">{{ layout.t("cred.add_host") }}</a>{% endif %}
+    </p>
+    <form method="post" action="/repos/{{ repo.id }}/credentials" class="stack">
       <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
       <label class="field">
-        <span>{{ layout.t("repo.delete_confirm") }} <code>{{ full_name }}</code></span>
-        <input name="confirm" required autocomplete="off" spellcheck="false">
+        <span>{{ layout.t("cred.username") }}</span>
+        <input name="username" value="{% if let Some(name) = repo.username %}{{ name }}{% endif %}" spellcheck="false" autocomplete="off">
+        <small class="muted">{{ layout.t("cred.username_help") }}</small>
       </label>
-      <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("repo.delete") }}</button></div>
+      <label class="field">
+        <span>{{ layout.t("cred.repo_token") }}</span>
+        <input name="token" type="password" autocomplete="new-password" spellcheck="false">
+        <small class="muted">{% if has_own_token() %}{{ layout.t("cred.token_keep") }}{% else %}{{ layout.t("cred.repo_token_help") }}{% endif %}</small>
+      </label>
+      {% if has_own_token() %}
+      <label class="check">
+        <input type="checkbox" name="clear_token" value="1">
+        <span>{{ layout.t("cred.clear_token") }}</span>
+      </label>
+      {% endif %}
+      <div class="actions"><button class="btn" type="submit">{{ layout.t("form.save") }}</button></div>
     </form>
   </section>
 </div>
+
+<section class="card danger-zone form-card">
+  <h2>{{ layout.t("repo.delete") }}</h2>
+  <p class="muted">{{ layout.t("repo.delete_help") }}</p>
+  <form method="post" action="/repos/{{ repo.id }}/delete" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("repo.delete_confirm") }} <code>{{ full_name }}</code></span>
+      <input name="confirm" required autocomplete="off" spellcheck="false">
+    </label>
+    <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("repo.delete") }}</button></div>
+  </form>
+</section>
 {% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}{{ host.host }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/hosts">{{ layout.t("hosts.title") }}</a> / {{ host.host }}</nav>
+<div class="grid-2">
+  <section class="card">
+    <h1>{{ layout.t("hosts.edit") }}</h1>
+    {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+    {% include "host_form.html" %}
+  </section>
+
+  <section class="card danger-zone">
+    <h2>{{ layout.t("hosts.delete") }}</h2>
+    <p class="muted">{{ layout.t("hosts.delete_help") }}</p>
+    <form method="post" action="/hosts/{{ host.id }}/delete">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("hosts.delete") }}</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

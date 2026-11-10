@@ -1,7 +1,9 @@
 //! HTTP routing and shared request state.
 
 pub mod auth;
+pub mod form;
 pub mod format;
+pub mod hosts;
 pub mod pages;
 pub mod prefs;
 pub mod repos;
@@ -85,7 +87,11 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}", get(repos::show))
         .route("/repos/{id}/sync", post(repos::sync_now))
         .route("/repos/{id}/settings", post(repos::update))
+        .route("/repos/{id}/credentials", post(repos::update_credentials))
         .route("/repos/{id}/delete", post(repos::delete))
+        .route("/hosts", get(hosts::list).post(hosts::create))
+        .route("/hosts/{id}", get(hosts::show).post(hosts::update))
+        .route("/hosts/{id}/delete", post(hosts::delete))
         .route(
             "/settings",
             get(settings_page::show).post(settings_page::save),

@@ -1,0 +1,41 @@
+<form method="post" action="{{ fields.action }}" class="stack">
+  <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+  <label class="field">
+    <span>{{ layout.t("hosts.host") }}</span>
+    <input name="host" required value="{{ fields.host }}" placeholder="github.com" spellcheck="false" autocomplete="off">
+    <small class="muted">{{ layout.t("hosts.host_help") }}</small>
+  </label>
+  <label class="field">
+    <span>{{ layout.t("hosts.provider") }}</span>
+    <select name="provider">
+      {% for provider in fields.providers() %}
+      <option value="{{ provider.code() }}"{% if fields.is_provider(provider) %} selected{% endif %}>{{ layout.provider_label(provider) }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="field">
+    <span>{{ layout.t("hosts.api_url") }}</span>
+    <input name="api_base_url" type="url" value="{{ fields.api_base_url }}" placeholder="https://gitlab.example.com/api/v4" spellcheck="false" autocomplete="off">
+    <small class="muted">{{ layout.t("hosts.api_url_help") }}</small>
+  </label>
+  <label class="field">
+    <span>{{ layout.t("cred.username") }}</span>
+    <input name="username" value="{{ fields.username }}" spellcheck="false" autocomplete="off">
+    <small class="muted">{{ layout.t("cred.username_help") }}</small>
+  </label>
+  <label class="field">
+    <span>{{ layout.t("cred.token") }}</span>
+    <input name="token" type="password" autocomplete="new-password" spellcheck="false">
+    <small class="muted">{% if fields.token_stored %}{{ layout.t("cred.token_keep") }}{% else %}{{ layout.t("hosts.token_help") }}{% endif %}</small>
+  </label>
+  {% if fields.token_stored %}
+  <label class="check">
+    <input type="checkbox" name="clear_token" value="1">
+    <span>{{ layout.t("cred.clear_token") }}</span>
+  </label>
+  {% endif %}
+  <div class="actions">
+    <button class="btn btn-primary" type="submit">{% if fields.editing %}{{ layout.t("form.save") }}{% else %}{{ layout.t("hosts.add") }}{% endif %}</button>
+    {% if fields.editing %}<a class="btn btn-ghost" href="/hosts">{{ layout.t("form.cancel") }}</a>{% endif %}
+  </div>
+</form>

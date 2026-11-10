@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("hosts.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ layout.t("hosts.title") }}</h1>
+    <p class="muted">{{ layout.t("hosts.intro") }}</p>
+  </div>
+</div>
+{% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
+
+{% if hosts.is_empty() %}
+<section class="card">
+  <p class="muted">{{ layout.t("hosts.empty") }}</p>
+</section>
+{% else %}
+<section class="card table-card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("hosts.host") }}</th>
+        <th scope="col">{{ layout.t("hosts.provider") }}</th>
+        <th scope="col">{{ layout.t("cred.username") }}</th>
+        <th scope="col">{{ layout.t("cred.token") }}</th>
+        <th scope="col">{{ layout.t("hosts.api_url") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for host in hosts %}
+      <tr>
+        <td><a class="repo-name" href="/hosts/{{ host.id }}"><strong>{{ host.host }}</strong></a></td>
+        <td>{{ layout.provider_label(host.provider) }}</td>
+        <td class="mono small">{% if let Some(name) = host.username %}{{ name }}{% else %}–{% endif %}</td>
+        <td>{% if host.token_enc.is_some() %}<span class="badge badge-ok">{{ layout.t("cred.token_stored") }}</span>{% else %}<span class="badge">{{ layout.t("cred.token_none") }}</span>{% endif %}</td>
+        <td class="mono small">{% if let Some(url) = host.api_base_url %}{{ url }}{% else %}–{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="card form-card">
+  <h2>{{ layout.t("hosts.add") }}</h2>
+  {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+  {% include "host_form.html" %}
+</section>
+{% endblock %}

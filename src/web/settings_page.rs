@@ -7,8 +7,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
+use super::form::{InvalidNumber, optional_number};
 use super::pages::{Layout, Nav, render};
-use super::repos::{InvalidNumber, NoticeQuery, PageContext, optional_number};
+use super::repos::{NoticeQuery, PageContext};
 use crate::error::AppError;
 use crate::settings::{
     self, CONCURRENCY_RANGE, GIT_TIMEOUT_RANGE, INTERVAL_RANGE, Overrides, SyncSettings,

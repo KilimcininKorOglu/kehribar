@@ -25,6 +25,22 @@
       <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
       <span>{{ layout.t("repo_new.wiki") }}</span>
     </label>
+    <details class="disclosure"{% if !username.is_empty() %} open{% endif %}>
+      <summary>{{ layout.t("cred.private") }}</summary>
+      <div class="stack">
+        <p class="muted small">{{ layout.t("cred.private_help") }}</p>
+        <label class="field">
+          <span>{{ layout.t("cred.username") }}</span>
+          <input name="username" value="{{ username }}" spellcheck="false" autocomplete="off">
+          <small class="muted">{{ layout.t("cred.username_help") }}</small>
+        </label>
+        <label class="field">
+          <span>{{ layout.t("cred.repo_token") }}</span>
+          <input name="token" type="password" autocomplete="new-password" spellcheck="false">
+          <small class="muted">{{ layout.t("cred.repo_token_help") }}</small>
+        </label>
+      </div>
+    </details>
     <div class="actions">
       <button class="btn btn-primary" type="submit">{{ layout.t("repo_new.submit") }}</button>
       <a class="btn btn-ghost" href="/">{{ layout.t("form.cancel") }}</a>

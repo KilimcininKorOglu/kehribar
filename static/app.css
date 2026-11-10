@@ -455,6 +455,21 @@ textarea:focus {
   margin-top: 0;
 }
 
+.disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+}
+
+.disclosure summary {
+  cursor: pointer;
+  font-weight: 550;
+}
+
+.disclosure[open] summary {
+  margin-bottom: 0.75rem;
+}
+
 .danger-zone {
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
 }

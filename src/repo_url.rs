@@ -49,11 +49,7 @@ impl UrlError {
 pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
     let url = Url::parse(input.trim()).map_err(|_| UrlError::Invalid)?;
     check_parts(&url)?;
-    let host = match (url.host_str(), url.port()) {
-        (Some(host), Some(port)) => format!("{host}:{port}"),
-        (Some(host), None) => host.to_owned(),
-        (None, _) => return Err(UrlError::Invalid),
-    };
+    let host = host_with_port(&url).ok_or(UrlError::Invalid)?;
     let segments = path_segments(&url)?;
     let (last, owners) = segments.split_last().ok_or(UrlError::Path)?;
     let name = last.strip_suffix(".git").unwrap_or(last);
@@ -66,6 +62,43 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         owner: owners.join("/"),
         name: name.to_owned(),
     })
+}
+
+/// The lowercase host name, with `:port` when the URL names a port that is
+/// not the default of its scheme.
+fn host_with_port(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
+}
+
+/// Validates a host name as [`RepoLocation::host`] stores it: a name with an
+/// optional port, without scheme, credentials or path. Returns the
+/// normalised (lowercase) form.
+pub fn parse_host(input: &str) -> Option<String> {
+    let input = input.trim();
+    if input.is_empty() || input.contains(['/', '\\', '@', '?', '#', ' ']) {
+        return None;
+    }
+    let url = Url::parse(&format!("https://{input}/")).ok()?;
+    let host = host_with_port(&url)?;
+    // The parser rewrites what it does not keep as given (a default port,
+    // an internationalised name), so only an exact match is accepted.
+    host.eq_ignore_ascii_case(input).then_some(host)
+}
+
+/// Validates an optional API base URL. A blank field gives `None`; a
+/// trailing slash is removed.
+pub fn parse_api_url(input: &str) -> Result<Option<String>, UrlError> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let url = Url::parse(input).map_err(|_| UrlError::Invalid)?;
+    check_parts(&url)?;
+    Ok(Some(url.as_str().trim_end_matches('/').to_owned()))
 }
 
 /// Rejects every URL part other than scheme, host, port and path.
@@ -203,6 +236,41 @@ mod tests {
         assert_eq!(
             archive_dir(base, "[::1]:8080", "o", "n"),
             PathBuf::from("/data/repos/___1__8080/o/n.git")
+        );
+    }
+
+    #[test]
+    fn host_names_are_validated_and_lowercased() {
+        assert_eq!(parse_host(" GitHub.com ").as_deref(), Some("github.com"));
+        assert_eq!(
+            parse_host("gitea.local:3000").as_deref(),
+            Some("gitea.local:3000")
+        );
+        assert_eq!(parse_host("[::1]:8080").as_deref(), Some("[::1]:8080"));
+        for bad in [
+            "",
+            "https://github.com",
+            "github.com/owner",
+            "user@github.com",
+            "github.com:443",
+            "git hub.com",
+            "github.com:99999",
+        ] {
+            assert_eq!(parse_host(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn api_urls_are_optional_and_lose_the_trailing_slash() {
+        assert_eq!(parse_api_url("  "), Ok(None));
+        assert_eq!(
+            parse_api_url("https://gitlab.example.com/api/v4/").unwrap(),
+            Some("https://gitlab.example.com/api/v4".to_owned())
+        );
+        assert_eq!(parse_api_url("ftp://x/api"), Err(UrlError::Scheme));
+        assert_eq!(
+            parse_api_url("https://t:k@x/api"),
+            Err(UrlError::Credentials)
         );
     }
 

@@ -335,6 +335,27 @@ mod tests {
         assert_eq!(err.kind, GitErrorKind::Timeout);
     }
 
+    #[test]
+    fn token_reaches_the_environment_but_never_the_arguments() {
+        let creds = Credentials {
+            username: "bot".into(),
+            password: "s3cret-token".into(),
+        };
+        let mut command = git().command(None, Some(&creds));
+        command.args(["fetch", "https://example.com/o/n"]);
+        let std = command.as_std();
+        let args: Vec<String> = std
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.iter().all(|a| !a.contains("s3cret-token")), "{args:?}");
+        let password = std
+            .get_envs()
+            .find(|(name, _)| *name == ENV_PASSWORD)
+            .and_then(|(_, value)| value);
+        assert_eq!(password, Some(std::ffi::OsStr::new("s3cret-token")));
+    }
+
     #[tokio::test]
     async fn credential_helper_answers_from_the_environment() {
         let creds = Credentials {

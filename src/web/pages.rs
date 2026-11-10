@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use super::auth::CurrentSession;
 use super::prefs::{Prefs, Theme};
 use super::{AppState, format};
+use crate::db::hosts::Provider;
 use crate::db::repos::RepoStatus;
 use crate::db::unix_now;
 use crate::error::AppError;
@@ -91,6 +92,16 @@ impl Layout {
             RepoStatus::Ok => "status.ok",
             RepoStatus::Error => "status.error",
             RepoStatus::Unreachable => "status.unreachable",
+        })
+    }
+
+    pub fn provider_label(&self, provider: &Provider) -> &str {
+        self.t(match provider {
+            Provider::Github => "provider.github",
+            Provider::Gitlab => "provider.gitlab",
+            Provider::Forgejo => "provider.forgejo",
+            Provider::Bitbucket => "provider.bitbucket",
+            Provider::Generic => "provider.generic",
         })
     }
 

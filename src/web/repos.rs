@@ -9,8 +9,10 @@ use serde::Deserialize;
 
 use super::AppState;
 use super::auth::CurrentSession;
+use super::form::{encrypt_token, is_checked, optional_number, optional_text};
 use super::pages::{Layout, Nav, render};
 use super::prefs::Prefs;
+use crate::db::hosts::{self, Host};
 use crate::db::repos::{self, NewRepo, Repo, RepoSettings, RepoStatus};
 use crate::db::sync_runs::{self, SyncRun};
 use crate::db::unix_now;
@@ -18,6 +20,7 @@ use crate::error::AppError;
 use crate::git::mirror;
 use crate::repo_url;
 use crate::settings::INTERVAL_RANGE;
+use crate::sync::credentials::{self, CredentialSource};
 
 /// Sync runs listed on the detail page.
 const HISTORY_LIMIT: i64 = 20;
@@ -31,7 +34,7 @@ pub struct PageContext {
 }
 
 impl PageContext {
-    fn layout(&self, nav: Nav) -> Layout {
+    pub fn layout(&self, nav: Nav) -> Layout {
         Layout::private(&self.state, self.prefs, &self.session, nav, &self.path)
     }
 }
@@ -58,30 +61,6 @@ where
             path: parts.uri.path().to_owned(),
         })
     }
-}
-
-/// A form field that is not a whole number in its allowed range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidNumber;
-
-/// Parses an optional whole number in `range`; an empty field is `None`.
-pub fn optional_number(
-    text: Option<&str>,
-    range: std::ops::RangeInclusive<i64>,
-) -> Result<Option<i64>, InvalidNumber> {
-    match text.map(str::trim).filter(|t| !t.is_empty()) {
-        None => Ok(None),
-        Some(text) => text
-            .parse()
-            .ok()
-            .filter(|value| range.contains(value))
-            .map(Some)
-            .ok_or(InvalidNumber),
-    }
-}
-
-fn is_checked(value: Option<&str>) -> bool {
-    value.is_some_and(|v| !v.is_empty())
 }
 
 #[derive(Template)]
@@ -133,6 +112,7 @@ struct NewPage {
     url: String,
     wiki: bool,
     interval: String,
+    username: String,
     error: Option<String>,
 }
 
@@ -142,6 +122,7 @@ pub async fn new_form(ctx: PageContext) -> Result<Response, AppError> {
         url: String::new(),
         wiki: true,
         interval: String::new(),
+        username: String::new(),
         error: None,
     };
     Ok(render(&page)?.into_response())
@@ -152,10 +133,13 @@ pub struct NewRepoForm {
     url: String,
     wiki: Option<String>,
     interval: Option<String>,
+    username: Option<String>,
+    token: Option<String>,
 }
 
 pub async fn create(ctx: PageContext, Form(form): Form<NewRepoForm>) -> Result<Response, AppError> {
     let wiki = is_checked(form.wiki.as_deref());
+    // The token is never sent back to the browser; it must be typed again.
     let invalid = |ctx: &PageContext, key: &str| {
         let layout = ctx.layout(Nav::Repos);
         let page = NewPage {
@@ -164,6 +148,7 @@ pub async fn create(ctx: PageContext, Form(form): Form<NewRepoForm>) -> Result<R
             url: form.url.clone(),
             wiki,
             interval: form.interval.clone().unwrap_or_default(),
+            username: form.username.clone().unwrap_or_default(),
         };
         Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response())
     };
@@ -174,14 +159,15 @@ pub async fn create(ctx: PageContext, Form(form): Form<NewRepoForm>) -> Result<R
     let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {
         return invalid(&ctx, "form.interval_invalid");
     };
+    let token_enc = encrypt_token(&ctx.state.cipher, form.token.as_deref())?;
     let repo = NewRepo {
         url: &location.url,
         host: &location.host,
         owner: &location.owner,
         name: &location.name,
         source_id: None,
-        username: None,
-        token_enc: None,
+        username: optional_text(form.username.as_deref()),
+        token_enc: token_enc.as_deref(),
         interval_minutes: interval,
         wiki_enabled: wiki,
     };
@@ -205,11 +191,29 @@ struct DetailPage {
     notice: Option<String>,
     error: Option<String>,
     full_name: String,
+    /// The host entry of this repository, when there is one.
+    host: Option<Host>,
+    credential_source: CredentialSource,
 }
 
 impl DetailPage {
     fn busy(&self) -> bool {
         matches!(self.repo.status, RepoStatus::Pending | RepoStatus::Syncing)
+    }
+
+    /// The sentence that says where the token of this repository comes from.
+    fn credential_text(&self) -> String {
+        match self.credential_source {
+            CredentialSource::Repo => self.layout.t("cred.source_repo").to_owned(),
+            CredentialSource::Host => self
+                .layout
+                .tf("cred.source_host", &[("host", &self.repo.host)]),
+            CredentialSource::Anonymous => self.layout.t("cred.source_none").to_owned(),
+        }
+    }
+
+    fn has_own_token(&self) -> bool {
+        self.credential_source == CredentialSource::Repo
     }
 }
 
@@ -230,6 +234,8 @@ async fn detail_page(
 ) -> Result<DetailPage, AppError> {
     let runs = sync_runs::list_for_repo(&ctx.state.pool, repo.id, HISTORY_LIMIT).await?;
     let global = crate::settings::effective(&ctx.state.pool, &ctx.state.config).await?;
+    let host = hosts::find_by_host(&ctx.state.pool, &repo.host).await?;
+    let credential_source = credentials::source(&repo, host.as_ref());
     let layout = ctx.layout(Nav::Repos);
     let notice = notice_key.map(|key| layout.t(key).to_owned());
     let global_interval = layout.tf_number("repo.interval_global", &global.interval_minutes);
@@ -246,6 +252,8 @@ async fn detail_page(
         runs,
         notice,
         error,
+        host,
+        credential_source,
     })
 }
 
@@ -254,6 +262,7 @@ fn notice_key(notice: Option<&str>) -> Option<&'static str> {
     match notice? {
         "queued" => Some("repo.sync_queued"),
         "saved" => Some("repo.saved"),
+        "credentials" => Some("cred.saved"),
         _ => None,
     }
 }
@@ -297,13 +306,34 @@ pub async fn update(
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
     };
     let settings = RepoSettings {
-        username: repo.username.as_deref(),
-        token_enc: None,
         interval_minutes: interval,
         wiki_enabled: is_checked(form.wiki.as_deref()),
     };
-    repos::update_settings(&ctx.state.pool, id, &settings).await?;
+    repos::update_settings(&ctx.state.pool, id, settings).await?;
     Ok(Redirect::to(&format!("/repos/{id}?notice=saved")).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CredentialsForm {
+    username: Option<String>,
+    token: Option<String>,
+    clear_token: Option<String>,
+}
+
+pub async fn update_credentials(
+    ctx: PageContext,
+    Path(id): Path<i64>,
+    Form(form): Form<CredentialsForm>,
+) -> Result<Response, AppError> {
+    load_repo(&ctx.state, id).await?;
+    let token_enc = encrypt_token(&ctx.state.cipher, form.token.as_deref())?;
+    let username = optional_text(form.username.as_deref());
+    repos::update_credentials(&ctx.state.pool, id, username, token_enc.as_deref()).await?;
+    // A new token wins over the clear box.
+    if token_enc.is_none() && is_checked(form.clear_token.as_deref()) {
+        repos::clear_token(&ctx.state.pool, id).await?;
+    }
+    Ok(Redirect::to(&format!("/repos/{id}?notice=credentials")).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,22 +389,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_number_accepts_blank_and_values_in_range() {
-        assert_eq!(optional_number(None, 1..=10), Ok(None));
-        assert_eq!(optional_number(Some("  "), 1..=10), Ok(None));
-        assert_eq!(optional_number(Some(" 7 "), 1..=10), Ok(Some(7)));
-        for bad in ["0", "11", "5m"] {
-            assert_eq!(
-                optional_number(Some(bad), 1..=10),
-                Err(InvalidNumber),
-                "{bad}"
-            );
-        }
-    }
-
-    #[test]
     fn only_known_notices_are_shown() {
         assert_eq!(notice_key(Some("queued")), Some("repo.sync_queued"));
+        assert_eq!(notice_key(Some("credentials")), Some("cred.saved"));
         assert_eq!(notice_key(Some("<script>")), None);
         assert_eq!(notice_key(None), None);
     }
