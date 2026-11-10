@@ -4,6 +4,7 @@ pub mod auth;
 pub mod browse;
 pub mod form;
 pub mod format;
+pub mod git_http;
 pub mod highlight;
 pub mod hosts;
 pub mod markdown;
@@ -19,7 +20,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 
@@ -98,6 +99,7 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/commits", get(browse::commits))
         .route("/repos/{id}/commit/{sha}", get(browse::commit))
         .route("/repos/{id}/refs", get(browse::refs))
+        .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/{id}", get(hosts::show).post(hosts::update))
@@ -115,6 +117,8 @@ pub fn router(state: AppState) -> Router {
         .route("/login", get(auth::login_form).post(auth::login))
         .route("/prefs", post(prefs::update))
         .route("/static/{file}", get(pages::static_file))
+        // Git clients authenticate with HTTP Basic, not with the session.
+        .route("/git/{*path}", any(git_http::serve))
         .merge(private)
         .layer(from_fn(security::same_origin))
         .layer(from_fn(security::headers))

@@ -661,6 +661,29 @@ a.plain {
   font-size: 0.9rem;
 }
 
+.tree-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.tree-bar .path-crumbs {
+  margin: 0;
+}
+
+.clone-command {
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
 .path-crumbs {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;

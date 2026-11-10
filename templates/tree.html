@@ -7,7 +7,14 @@
 {% if view.commit.is_none() %}
 <section class="card"><p class="muted">{{ layout.t("browse.empty") }}</p></section>
 {% else %}
-{% include "path_crumbs.html" %}
+<div class="tree-bar">
+  {% include "path_crumbs.html" %}
+  <div class="actions">
+    <span class="muted small">{{ layout.t("browse.download") }}</span>
+    <a class="btn btn-sm" href="{{ view.archive_url("zip") }}" download>ZIP</a>
+    <a class="btn btn-sm" href="{{ view.archive_url("tar.gz") }}" download>tar.gz</a>
+  </div>
+</div>
 <section class="card table-card">
   <table class="table files">
     <tbody>

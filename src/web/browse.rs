@@ -64,6 +64,7 @@ pub struct BrowseQuery {
     path: Option<String>,
     q: Option<String>,
     page: Option<usize>,
+    format: Option<String>,
 }
 
 /// The revision a page shows and the links it builds.
@@ -126,6 +127,16 @@ impl RepoView {
 
     pub fn commits_url(&self) -> String {
         self.page_url("commits", "")
+    }
+
+    /// Download of the whole tree as `zip` or `tar.gz`.
+    pub fn archive_url(&self, format: &str) -> String {
+        let mut pairs = form_urlencoded::Serializer::new(String::new());
+        if let Some(rev) = self.own_rev() {
+            pairs.append_pair("ref", rev);
+        }
+        pairs.append_pair("format", format);
+        format!("/repos/{}/archive?{}", self.id, pairs.finish())
     }
 
     pub fn commit_url(&self, sha: &str) -> String {
@@ -471,6 +482,57 @@ pub async fn raw(
     Ok(response)
 }
 
+/// The formats `git archive` writes: query value, git format, MIME type.
+const ARCHIVE_FORMATS: &[(&str, &str, &str)] = &[
+    ("zip", "zip", "application/zip"),
+    ("tar.gz", "tar.gz", "application/gzip"),
+];
+
+/// The tree of a revision as a ZIP or tar.gz file, streamed from
+/// `git archive`. Its files sit under `<name>-<revision>/`.
+pub async fn archive(
+    ctx: PageContext,
+    Path(id): Path<i64>,
+    Query(query): Query<BrowseQuery>,
+) -> Result<Response, AppError> {
+    let wanted = query.format.as_deref().unwrap_or("zip");
+    let (ext, format, mime) = ARCHIVE_FORMATS
+        .iter()
+        .copied()
+        .find(|(ext, ..)| *ext == wanted)
+        .ok_or(AppError::NotFound)?;
+    let repo = load_repo(&ctx, id).await?;
+    let view = load_view(&ctx, &repo, query.rev.as_deref()).await?;
+    let commit = commit_of(&view)?;
+    let label = archive_label(&repo.name, view.rev_label());
+    let format_arg = format!("--format={format}");
+    let prefix_arg = format!("--prefix={label}/");
+    let args = ["archive", format_arg.as_str(), prefix_arg.as_str(), commit];
+    let stdout = view.git.spawn_stdout(&view.dir, &args)?;
+    let mut response = Body::from_stream(ReaderStream::new(stdout)).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
+    let disposition = format!("attachment; filename=\"{label}.{ext}\"");
+    let value = HeaderValue::from_str(&disposition).map_err(AppError::internal)?;
+    headers.insert(header::CONTENT_DISPOSITION, value);
+    Ok(response)
+}
+
+/// `<name>-<revision>` with every character outside `[A-Za-z0-9._-]`
+/// replaced, so it is safe as a file name and inside a header.
+fn archive_label(name: &str, rev: &str) -> String {
+    format!("{name}-{rev}")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
 /// RFC 5987 encoding of a file name for `Content-Disposition`.
 fn encode_filename(name: &str) -> String {
     form_urlencoded::byte_serialize(name.as_bytes())
@@ -779,5 +841,6 @@ mod tests {
         assert_eq!(image_type("logo.SVG"), Some("image/svg+xml"));
         assert_eq!(image_type("index.html"), None);
         assert_eq!(encode_filename("a b\"c.bin"), "a%20b%22c.bin");
+        assert_eq!(archive_label("proj", "feature/x\"y"), "proj-feature-x-y");
     }
 }

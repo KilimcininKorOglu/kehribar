@@ -209,6 +209,12 @@ rescued = "Rewritten history"
 rescued_help = "The source rewrote these refs with a force push. The archive keeps the old commits here. The name holds the rescue time (Unix seconds) and the original ref."
 default_branch = "Default"
 history = "History"
+download = "Download:"
+
+[clone]
+title = "Clone from the archive"
+help = "Git asks for a username and password: use the admin credentials of this site. Branches and tags are cloned."
+mirror_help = "A mirror clone also takes every other ref, including the rewritten history that the archive kept."
 
 [change]
 added = "Added"

@@ -62,7 +62,7 @@ pub struct GitError {
 
 impl GitError {
     /// An error raised before or around git, which has no exit code.
-    fn local(kind: GitErrorKind, message: String) -> Self {
+    pub(crate) fn local(kind: GitErrorKind, message: String) -> Self {
         Self {
             kind,
             exit_code: None,

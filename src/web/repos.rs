@@ -31,6 +31,8 @@ pub struct PageContext {
     pub prefs: Prefs,
     pub session: CurrentSession,
     pub path: String,
+    /// The `Host` header, which builds absolute URLs such as the clone URL.
+    pub host: Option<String>,
 }
 
 impl PageContext {
@@ -59,6 +61,11 @@ where
             prefs: Prefs::from_headers(&parts.headers),
             session,
             path: parts.uri.path().to_owned(),
+            host: parts
+                .headers
+                .get(axum::http::header::HOST)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned),
         })
     }
 }
@@ -196,6 +203,8 @@ struct DetailPage {
     credential_source: CredentialSource,
     /// The active tab of `repo_tabs.html`.
     tab: &'static str,
+    /// `git clone` URL of the archive on this site.
+    clone_url: String,
 }
 
 impl DetailPage {
@@ -238,6 +247,7 @@ async fn detail_page(
     let global = crate::settings::effective(&ctx.state.pool, &ctx.state.config).await?;
     let host = hosts::find_by_host(&ctx.state.pool, &repo.host).await?;
     let credential_source = credentials::source(&repo, host.as_ref());
+    let clone_url = clone_url(ctx, &repo);
     let layout = ctx.layout(Nav::Repos);
     let notice = notice_key.map(|key| layout.t(key).to_owned());
     let global_interval = layout.tf_number("repo.interval_global", &global.interval_minutes);
@@ -257,7 +267,23 @@ async fn detail_page(
         host,
         credential_source,
         tab: "overview",
+        clone_url,
     })
+}
+
+/// `http(s)://<site>/git/<host>/<owner>/<name>.git`. The scheme follows the
+/// secure-cookie setting, which is on when the site runs behind HTTPS.
+fn clone_url(ctx: &PageContext, repo: &Repo) -> String {
+    let scheme = if ctx.state.config.cookie_secure {
+        "https"
+    } else {
+        "http"
+    };
+    let site = ctx.host.as_deref().unwrap_or("localhost");
+    format!(
+        "{scheme}://{site}/git/{}/{}/{}.git",
+        repo.host, repo.owner, repo.name
+    )
 }
 
 /// Maps the `notice` query value to a message key, ignoring anything else.

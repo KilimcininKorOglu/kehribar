@@ -209,6 +209,12 @@ rescued = "Yeniden yazılmış geçmiş"
 rescued_help = "Kaynak bu ref'leri force-push ile değiştirdi. Arşiv eski commit'leri burada saklıyor. Ad, kurtarma zamanını (Unix saniyesi) ve özgün ref'i taşır."
 default_branch = "Varsayılan"
 history = "Geçmiş"
+download = "İndir:"
+
+[clone]
+title = "Arşivden klonla"
+help = "Git kullanıcı adı ve parola sorar: bu sitenin admin bilgilerini girin. Branch'ler ve tag'ler klonlanır."
+mirror_help = "Mirror klon, arşivin sakladığı yeniden yazılmış geçmiş dahil diğer tüm ref'leri de alır."
 
 [change]
 added = "Eklendi"

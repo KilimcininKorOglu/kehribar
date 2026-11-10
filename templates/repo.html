@@ -36,6 +36,14 @@
 </section>
 
 <section class="card">
+  <h2>{{ layout.t("clone.title") }}</h2>
+  <p class="muted small">{{ layout.t("clone.help") }}</p>
+  <pre class="clone-command"><code>git clone {{ clone_url }}</code></pre>
+  <p class="muted small">{{ layout.t("clone.mirror_help") }}</p>
+  <pre class="clone-command"><code>git clone --mirror {{ clone_url }}</code></pre>
+</section>
+
+<section class="card">
   <h2>{{ layout.t("repo.history") }}</h2>
   {% if runs.is_empty() %}
   <p class="muted">{{ layout.t("repo.no_history") }}</p>
