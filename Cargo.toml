@@ -1,0 +1,32 @@
+[package]
+name = "git-archive"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Mirrors Git repositories with their full history and serves a read-only web UI"
+license = "MIT"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+thiserror = "2.0"
+tokio = { version = "1.54", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Cyclomatic complexity (limit 10) is enforced by lizard in `make lint`.
+# clippy::cognitive_complexity is a different metric that also counts the
+# branches inside macro expansions such as tracing::error!.
+[lints.clippy]
+expect_used = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+lto = "thin"
+strip = true
