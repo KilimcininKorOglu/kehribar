@@ -21,7 +21,7 @@ async fn invalid_url_is_rejected_with_a_message() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = body_text(response).await;
     assert!(
-        html.contains("Yalnız http ve https URL&#39;leri desteklenir."),
+        html.contains("Yalnız http ve https ile başlayan URL&#39;ler kabul edilir."),
         "{html}"
     );
     assert!(repos::list(&t.state.pool, None).await.unwrap().is_empty());
@@ -48,7 +48,7 @@ async fn adding_a_repository_lists_it_and_rejects_a_duplicate() {
 
     let list = body_text(t.get("/").await).await;
     assert!(list.contains("href=\"/repos/1\""));
-    assert!(list.contains("Bekliyor"));
+    assert!(list.contains("Sırada"));
     // A pending repository makes the table refresh itself.
     assert!(list.contains("hx-trigger=\"every 5s\""));
 
@@ -85,7 +85,7 @@ async fn search_filters_the_list() {
     assert!(html.contains("/repos/2"));
     assert!(!html.contains("/repos/1\""));
     let none = body_text(t.get("/?q=nothing-like-this").await).await;
-    assert!(none.contains("Aramayla eşleşen repo yok."));
+    assert!(none.contains("Aramanızla eşleşen repo yok."));
 }
 
 #[tokio::test]
@@ -111,7 +111,7 @@ async fn detail_page_sync_now_and_repository_settings() {
     let html = body_text(t.get("/repos/1").await).await;
     assert!(html.contains("rust-lang/<strong>rust</strong>"));
     assert!(html.contains("2,0 KB"));
-    assert!(html.contains("Boş bırakılırsa global aralık kullanılır: 360 dakika."));
+    assert!(html.contains("Boş bırakırsanız genel aralık kullanılır: 360 dakika."));
 
     let queued = t.post("/repos/1/sync", "").await;
     assert_eq!(
@@ -123,7 +123,7 @@ async fn detail_page_sync_now_and_repository_settings() {
     assert!(
         body_text(t.get("/repos/1?notice=queued").await)
             .await
-            .contains("Sync sıraya alındı.")
+            .contains("Güncelleme sıraya alındı.")
     );
 
     let bad = t.post("/repos/1/settings", "interval=99999").await;
@@ -191,7 +191,7 @@ async fn unknown_repository_is_not_found() {
 async fn settings_page_saves_overrides_and_rejects_out_of_range_values() {
     let t = TestApp::new().await;
     let page = body_text(t.get("/settings").await).await;
-    assert!(page.contains("Ortam değeri: 360"));
+    assert!(page.contains("Ortam değişkenindeki değer: 360"));
 
     let bad = t
         .post("/settings", "interval=0&concurrency=&git_timeout=")

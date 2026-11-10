@@ -240,7 +240,7 @@ async fn blame_names_the_commit_of_each_line() {
     assert!(html.contains("initial import"));
     assert!(html.contains(&esc("println!(\"hello\");")));
     let binary = page(&t, "/repos/1/blame?path=img/logo.png").await;
-    assert!(binary.contains("blame yapılamaz"));
+    assert!(binary.contains("blame gösterilemez"));
 }
 
 #[tokio::test]

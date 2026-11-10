@@ -213,7 +213,10 @@ mod tests {
     #[test]
     fn lookup_uses_the_language_and_falls_back_to_the_key() {
         let catalog = catalog();
-        assert_eq!(Tr::new(catalog.clone(), Lang::Tr).t("nav.logout"), "Çıkış");
+        assert_eq!(
+            Tr::new(catalog.clone(), Lang::Tr).t("nav.logout"),
+            "Çıkış yap"
+        );
         assert_eq!(
             Tr::new(catalog.clone(), Lang::En).t("nav.logout"),
             "Sign out"

@@ -227,13 +227,13 @@ async fn the_sources_page_imports_an_organization() {
     assert_eq!(archived_urls(&t).await, ["https://github.com/octo/app.git"]);
 
     let page = body_text(t.get("/sources?notice=added").await).await;
-    assert!(page.contains("Kaynak eklendi."));
+    assert!(page.contains("Kaynak eklendi, ilk tarama başladı."));
     assert!(page.contains("<strong>octo</strong>"));
 
     // The same source twice is refused.
     let again = t.post("/sources", &form).await;
     assert_eq!(again.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body_text(again).await.contains("Bu kaynak zaten listede."));
+    assert!(body_text(again).await.contains("Bu kaynak zaten ekli."));
 
     // Options and deletion; the repository stays.
     let saved = t
@@ -272,11 +272,11 @@ async fn invalid_source_forms_are_rejected() {
     let cases = [
         (
             format!("host_id={generic}&kind=org&name=octo"),
-            "Listeden bir host seçin.",
+            "Listeden bir sunucu seçin.",
         ),
         (
             "host_id=999&kind=org&name=octo".to_owned(),
-            "Listeden bir host seçin.",
+            "Listeden bir sunucu seçin.",
         ),
         (
             format!("host_id={github}&kind=team&name=octo"),
@@ -284,11 +284,11 @@ async fn invalid_source_forms_are_rejected() {
         ),
         (
             format!("host_id={github}&kind=org&name=a%2Fb"),
-            "Yalnız bir GitLab grubu",
+            "yalnız GitLab gruplarında kullanılabilir",
         ),
         (
             format!("host_id={github}&kind=org&name=%3Cscript%3E"),
-            "Harf, rakam",
+            "Ad yalnız harf, rakam",
         ),
     ];
     for (form, message) in cases {

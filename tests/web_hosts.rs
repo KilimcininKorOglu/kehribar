@@ -38,7 +38,7 @@ async fn adding_a_host_stores_the_token_encrypted_and_never_shows_it() {
     assert_eq!(decrypt(&t, host.token_enc).as_deref(), Some("ghp_secret1"));
 
     let list = body_text(t.get("/hosts?notice=saved").await).await;
-    assert!(list.contains("Host kaydedildi."));
+    assert!(list.contains("Sunucu kaydedildi."));
     assert!(list.contains("href=\"/hosts/1\""));
     assert!(list.contains("Kayıtlı"));
     let edit = body_text(t.get("/hosts/1").await).await;
@@ -54,7 +54,7 @@ async fn invalid_and_duplicate_hosts_are_rejected() {
     for (form, message) in [
         (
             "host=https%3A%2F%2Fgithub.com&provider=github",
-            "http:// ve yol yazmayın",
+            "Başına http:// ve sonuna yol eklemeyin.",
         ),
         (
             "host=github.com&provider=svn",
@@ -62,7 +62,7 @@ async fn invalid_and_duplicate_hosts_are_rejected() {
         ),
         (
             "host=gitlab.example.com&provider=gitlab&api_base_url=ftp%3A%2F%2Fx",
-            "Yalnız http ve https URL&#39;leri desteklenir.",
+            "Yalnız http ve https ile başlayan URL&#39;ler kabul edilir.",
         ),
     ] {
         let response = t.post("/hosts", form).await;
@@ -78,7 +78,7 @@ async fn invalid_and_duplicate_hosts_are_rejected() {
     t.post("/hosts", HOST_FORM).await;
     let again = t.post("/hosts", "host=github.com&provider=generic").await;
     assert_eq!(again.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body_text(again).await.contains("Bu host zaten listede."));
+    assert!(body_text(again).await.contains("Bu sunucu zaten ekli."));
 }
 
 #[tokio::test]
@@ -169,7 +169,7 @@ async fn repository_access_follows_the_host_and_its_own_token() {
     assert_eq!((repo.username, repo.token_enc), (None, None));
     let page = body_text(t.get("/repos/1?notice=credentials").await).await;
     assert!(page.contains("Erişim ayarları kaydedildi."));
-    assert!(page.contains("github.com hostunun varsayılan token&#39;ını kullanıyor."));
+    assert!(page.contains("Bu repo, github.com sunucusunun varsayılan token&#39;ını kullanıyor."));
 
     t.post("/repos/1/credentials", "token=repo_secret2").await;
     let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
