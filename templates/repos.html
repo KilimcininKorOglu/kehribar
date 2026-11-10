@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("repos.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ layout.t("repos.title") }}</h1>
+    <p class="muted">{{ layout.tf_number("repos.count", total as i64) }}</p>
+  </div>
+  <a class="btn btn-primary" href="/repos/new">{{ layout.t("repos.add") }}</a>
+</div>
+
+{% if total > 0 %}
+<form class="search" method="get" action="/" role="search">
+  <label class="visually-hidden" for="q">{{ layout.t("repos.search") }}</label>
+  <input id="q" type="search" name="q" value="{{ query }}" placeholder="{{ layout.t("repos.search_placeholder") }}"
+         hx-get="/" hx-trigger="input changed delay:300ms, search" hx-target="#repo-table"
+         hx-select="#repo-table" hx-swap="outerHTML" hx-push-url="true">
+</form>
+{% endif %}
+
+<div id="repo-table"{% if busy %} hx-get="{{ layout.path }}" hx-trigger="every 5s" hx-select="#repo-table" hx-swap="outerHTML"{% endif %}>
+{% if total == 0 %}
+  <section class="card empty-state">
+    <h2>{{ layout.t("repos.empty_title") }}</h2>
+    <p class="muted">{{ layout.t("repos.empty_body") }}</p>
+    <a class="btn btn-primary" href="/repos/new">{{ layout.t("repos.add") }}</a>
+  </section>
+{% else if repos.is_empty() %}
+  <section class="card empty-state">
+    <p class="muted">{{ layout.t("repos.no_match") }}</p>
+  </section>
+{% else %}
+  <div class="card table-card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ layout.t("repos.col_repo") }}</th>
+          <th scope="col">{{ layout.t("repos.col_status") }}</th>
+          <th scope="col">{{ layout.t("repos.col_last_sync") }}</th>
+          <th scope="col">{{ layout.t("repos.col_next") }}</th>
+          <th scope="col" class="num">{{ layout.t("repos.col_size") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for repo in repos %}
+        <tr>
+          <td>
+            <a class="repo-name" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a>
+            <div class="muted small">{{ repo.host }}</div>
+          </td>
+          <td>
+            <span class="badge badge-{{ repo.status.code() }}"{% if let Some(error) = repo.last_error %} title="{{ error }}"{% endif %}>{{ layout.status_label(repo.status) }}</span>
+          </td>
+          <td>{% if let Some(ts) = repo.last_sync_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}<span class="muted">{{ layout.t("time.never") }}</span>{% endif %}</td>
+          <td><time title="{{ layout.absolute(repo.next_sync_at) }}">{{ layout.ago(repo.next_sync_at) }}</time></td>
+          <td class="num">{{ layout.bytes(repo.size_bytes) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

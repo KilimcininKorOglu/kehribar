@@ -25,6 +25,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
     init_tracing(&config.log_level)?;
     let state = build_state(config).await?;
+    state.scheduler.clone().spawn();
     serve(state).await
 }
 

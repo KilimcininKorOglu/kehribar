@@ -78,6 +78,14 @@ impl Tr {
             .get(key)
             .map_or(key, String::as_str)
     }
+
+    /// Returns the message for `key` with every `{name}` replaced by its value.
+    pub fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
+        args.iter()
+            .fold(self.t(key).to_owned(), |text, (name, value)| {
+                text.replace(&format!("{{{name}}}"), value)
+            })
+    }
 }
 
 fn parse(file: &'static str, source: &str) -> Result<HashMap<String, String>, LocaleError> {

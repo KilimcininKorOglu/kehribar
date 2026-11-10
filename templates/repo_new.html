@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("repo_new.title") }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ layout.t("repo_new.title") }}</nav>
+<section class="card form-card">
+  <h1>{{ layout.t("repo_new.title") }}</h1>
+  {% if let Some(error) = error %}
+  <p class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/repos" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("repo_new.url") }}</span>
+      <input name="url" type="url" required autofocus value="{{ url }}" placeholder="https://github.com/owner/name" spellcheck="false" autocomplete="off">
+      <small class="muted">{{ layout.t("repo_new.url_help") }}</small>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("repo_new.interval") }}</span>
+      <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
+      <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
+      <span>{{ layout.t("repo_new.wiki") }}</span>
+    </label>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">{{ layout.t("repo_new.submit") }}</button>
+      <a class="btn btn-ghost" href="/">{{ layout.t("form.cancel") }}</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

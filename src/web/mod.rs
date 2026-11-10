@@ -1,9 +1,12 @@
 //! HTTP routing and shared request state.
 
 pub mod auth;
+pub mod format;
 pub mod pages;
 pub mod prefs;
+pub mod repos;
 pub mod security;
+pub mod settings_page;
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -18,6 +21,8 @@ use tokio::net::TcpListener;
 use crate::config::Config;
 use crate::crypto::Cipher;
 use crate::i18n::Catalog;
+use crate::sync::SyncContext;
+use crate::sync::scheduler::Scheduler;
 
 /// State shared by every request handler.
 #[derive(Clone)]
@@ -27,16 +32,26 @@ pub struct AppState {
     pub cipher: Cipher,
     pub catalog: Arc<Catalog>,
     pub limiter: Arc<auth::LoginLimiter>,
+    /// The caller decides whether its loop runs; handlers only wake it.
+    pub scheduler: Scheduler,
 }
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config, catalog: Catalog) -> Self {
+        let config = Arc::new(config);
+        let cipher = Cipher::new(&config.secret_key);
+        let scheduler = Scheduler::new(SyncContext {
+            pool: pool.clone(),
+            cipher: cipher.clone(),
+            config: config.clone(),
+        });
         Self {
             pool,
-            cipher: Cipher::new(&config.secret_key),
-            config: Arc::new(config),
+            cipher,
+            config,
             catalog: Arc::new(catalog),
             limiter: Arc::new(auth::LoginLimiter::default()),
+            scheduler,
         }
     }
 }
@@ -64,7 +79,17 @@ pub fn router(state: AppState) -> Router {
     // Layers run from the last added to the first: the session check runs
     // before the CSRF check, which needs the session.
     let private = Router::new()
-        .route("/", get(pages::home))
+        .route("/", get(repos::list))
+        .route("/repos/new", get(repos::new_form))
+        .route("/repos", post(repos::create))
+        .route("/repos/{id}", get(repos::show))
+        .route("/repos/{id}/sync", post(repos::sync_now))
+        .route("/repos/{id}/settings", post(repos::update))
+        .route("/repos/{id}/delete", post(repos::delete))
+        .route(
+            "/settings",
+            get(settings_page::show).post(settings_page::save),
+        )
         .route("/logout", post(auth::logout))
         .layer(from_fn(security::verify_csrf))
         .layer(from_fn_with_state(state.clone(), auth::require_session));

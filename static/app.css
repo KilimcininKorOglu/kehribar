@@ -392,6 +392,216 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--ok) 30%, transparent);
 }
 
+.small {
+  font-size: 0.85rem;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.breadcrumb {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.check input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.form-card {
+  max-width: 640px;
+}
+
+.card + .card,
+.card + .grid-2,
+.grid-2 + .card,
+.alert + .card,
+.alert + section {
+  margin-top: 1.25rem;
+}
+
+.alert {
+  margin: 0 0 1rem;
+}
+
+.card .alert {
+  margin: 1rem 0 0;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.danger-zone h2 {
+  color: var(--danger);
+}
+
+.search {
+  margin-bottom: 1rem;
+}
+
+.search input {
+  max-width: 420px;
+}
+
+/* Tables */
+
+.table-card {
+  padding: 0;
+  overflow-x: auto;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+
+.table th {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.table th.num,
+.table td.num {
+  text-align: right;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.repo-name {
+  font-size: 0.98rem;
+}
+
+.repo-title {
+  font-weight: 500;
+  word-break: break-word;
+}
+
+/* Status badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.badge::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.badge-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge-error,
+.badge-unreachable {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.badge-syncing {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.badge-syncing::before {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.badge-pending {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-syncing::before {
+    animation: none;
+  }
+}
+
+/* Repository summary */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 0;
+}
+
+.facts dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 550;
+}
+
 @media (max-width: 720px) {
   .topbar-inner {
     gap: 0.75rem;

@@ -5,50 +5,28 @@
 // step must abort the test.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::net::SocketAddr;
 
 use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
-use axum::http::{Request, Response, StatusCode, header};
-use git_archive::config::Config;
+use axum::http::{Request, StatusCode, header};
+use common::{PASSWORD, USER, body_text, header_value, send, test_config};
 use git_archive::db;
 use git_archive::i18n::Catalog;
 use git_archive::web::{self, AppState};
-use tower::ServiceExt;
 
-const USER: &str = "admin";
-const PASSWORD: &str = "correct horse";
 const FORM: &str = "application/x-www-form-urlencoded";
 
+/// The router keeps no files on disk for these tests, so the data directory
+/// is never created.
 async fn app() -> Router {
-    let config = Config::from_lookup(|name| match name {
-        "GIT_ARCHIVE_ADMIN_USERNAME" => Some(USER.into()),
-        "GIT_ARCHIVE_ADMIN_PASSWORD" => Some(PASSWORD.into()),
-        "GIT_ARCHIVE_SECRET_KEY" => Some("ab".repeat(32)),
-        _ => None,
-    })
-    .unwrap();
+    let config = test_config(std::path::Path::new("/nonexistent/git-archive-test"));
     let pool = db::open_in_memory().await.unwrap();
     let state = AppState::new(pool, config, Catalog::load().unwrap());
     web::router(state).layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))))
-}
-
-async fn send(app: &Router, request: Request<Body>) -> Response<Body> {
-    app.clone().oneshot(request).await.unwrap()
-}
-
-async fn body_text(response: Response<Body>) -> String {
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    String::from_utf8(bytes.to_vec()).unwrap()
-}
-
-fn header_value(response: &Response<Body>, name: impl header::AsHeaderName) -> String {
-    response
-        .headers()
-        .get(name)
-        .map(|v| v.to_str().unwrap().to_owned())
-        .unwrap_or_default()
 }
 
 fn post_form(uri: &str) -> axum::http::request::Builder {

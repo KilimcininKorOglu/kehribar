@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}{{ full_name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
+<div class="page-head">
+  <div>
+    <h1 class="repo-title">{{ repo.owner }}/<strong>{{ repo.name }}</strong></h1>
+    <a class="muted small mono" href="{{ repo.url }}" rel="noreferrer noopener" target="_blank">{{ repo.url }}</a>
+  </div>
+  <form method="post" action="/repos/{{ repo.id }}/sync">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <button class="btn btn-primary" type="submit"{% if busy() %} disabled{% endif %}>{{ layout.t("repo.sync_now") }}</button>
+  </form>
+</div>
+
+{% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
+{% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+
+<section id="repo-summary" class="card summary"{% if busy() %} hx-get="/repos/{{ repo.id }}" hx-trigger="every 3s" hx-select="#repo-summary" hx-swap="outerHTML"{% endif %}>
+  <dl class="facts">
+    <div><dt>{{ layout.t("repo.status") }}</dt><dd><span class="badge badge-{{ repo.status.code() }}">{{ layout.status_label(repo.status) }}</span></dd></div>
+    <div><dt>{{ layout.t("repo.last_sync") }}</dt><dd>{% if let Some(ts) = repo.last_sync_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.last_success") }}</dt><dd>{% if let Some(ts) = repo.last_success_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.next_sync") }}</dt><dd><time title="{{ layout.absolute(repo.next_sync_at) }}">{{ layout.ago(repo.next_sync_at) }}</time></dd></div>
+    <div><dt>{{ layout.t("repo.size") }}</dt><dd>{{ layout.bytes(repo.size_bytes) }}</dd></div>
+    <div><dt>{{ layout.t("repo.default_branch") }}</dt><dd class="mono">{% if let Some(branch) = repo.default_branch %}{{ branch }}{% else %}–{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.wiki") }}</dt><dd>{% if repo.has_wiki %}{{ layout.t("repo.wiki_yes") }}{% else %}{{ layout.t("repo.wiki_no") }}{% endif %}</dd></div>
+  </dl>
+  {% if let Some(message) = repo.last_error %}
+  <div class="alert alert-error"><strong>{{ layout.t("repo.last_error") }}:</strong> <span class="mono">{{ message }}</span></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>{{ layout.t("repo.history") }}</h2>
+  {% if runs.is_empty() %}
+  <p class="muted">{{ layout.t("repo.no_history") }}</p>
+  {% else %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ layout.t("repo.col_started") }}</th>
+          <th scope="col">{{ layout.t("repo.col_result") }}</th>
+          <th scope="col">{{ layout.t("repo.col_duration") }}</th>
+          <th scope="col" class="num">{{ layout.t("repo.col_changed") }}</th>
+          <th scope="col" class="num">{{ layout.t("repo.col_rescued") }}</th>
+          <th scope="col">{{ layout.t("repo.col_message") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td><time title="{{ layout.absolute(run.started_at) }}">{{ layout.ago(run.started_at) }}</time></td>
+          <td>{% if let Some(outcome) = run.outcome %}<span class="badge badge-{{ outcome.code() }}">{{ layout.status_label(outcome) }}</span>{% else %}<span class="badge badge-syncing">{{ layout.t("status.syncing") }}</span>{% endif %}</td>
+          <td>{% if let Some(end) = run.finished_at %}{{ layout.duration(*end - run.started_at) }}{% else %}–{% endif %}</td>
+          <td class="num">{{ run.refs_changed }}</td>
+          <td class="num">{{ run.refs_rescued }}</td>
+          <td class="mono small">{% if let Some(message) = run.message %}{{ message }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>{{ layout.t("repo.settings") }}</h2>
+    <form method="post" action="/repos/{{ repo.id }}/settings" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <label class="field">
+        <span>{{ layout.t("repo_new.interval") }}</span>
+        <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" placeholder="{{ global_minutes }}" inputmode="numeric">
+        <small class="muted">{{ global_interval }}</small>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="wiki" value="1"{% if repo.wiki_enabled %} checked{% endif %}>
+        <span>{{ layout.t("repo_new.wiki") }}</span>
+      </label>
+      <div class="actions"><button class="btn" type="submit">{{ layout.t("form.save") }}</button></div>
+    </form>
+  </section>
+
+  <section class="card danger-zone">
+    <h2>{{ layout.t("repo.delete") }}</h2>
+    <p class="muted">{{ layout.t("repo.delete_help") }}</p>
+    <form method="post" action="/repos/{{ repo.id }}/delete" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <label class="field">
+        <span>{{ layout.t("repo.delete_confirm") }} <code>{{ full_name }}</code></span>
+        <input name="confirm" required autocomplete="off" spellcheck="false">
+      </label>
+      <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("repo.delete") }}</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

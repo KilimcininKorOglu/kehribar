@@ -3,20 +3,22 @@
 use std::sync::LazyLock;
 
 use askama::Template;
-use axum::Extension;
-use axum::extract::{OriginalUri, Path, State};
+use axum::extract::Path;
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use sha2::{Digest, Sha256};
 
-use super::AppState;
 use super::auth::CurrentSession;
 use super::prefs::{Prefs, Theme};
+use super::{AppState, format};
+use crate::db::repos::RepoStatus;
+use crate::db::unix_now;
 use crate::error::AppError;
 use crate::i18n::{Lang, Tr};
 
 const APP_CSS: &str = include_str!("../../static/app.css");
 const HTMX_JS: &str = include_str!("../../static/htmx.min.js");
+const FAVICON_SVG: &str = include_str!("../../static/favicon.svg");
 
 /// Short content hash appended to asset URLs, so a new build is never served
 /// from a stale browser cache.
@@ -24,6 +26,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
     let digest = Sha256::new()
         .chain_update(APP_CSS)
         .chain_update(HTMX_JS)
+        .chain_update(FAVICON_SVG)
         .finalize();
     digest.iter().take(6).map(|b| format!("{b:02x}")).collect()
 });
@@ -48,6 +51,8 @@ pub struct Layout {
     pub nav: Nav,
     /// Path of this page, where the preference form returns to.
     pub path: String,
+    /// Render time, the reference point of relative times.
+    pub now: i64,
 }
 
 impl Layout {
@@ -58,7 +63,55 @@ impl Layout {
             csrf: None,
             nav: Nav::None,
             path: path.to_owned(),
+            now: unix_now(),
         }
+    }
+
+    pub fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
+        self.tr.tf(key, args)
+    }
+
+    // The helpers below take references, because askama passes every
+    // template argument by reference.
+
+    /// The message for `key` with `{n}` replaced by `n`.
+    pub fn tf_number(&self, key: &str, n: &i64) -> String {
+        self.tr.tf(key, &[("n", &n.to_string())])
+    }
+
+    /// The CSRF token for hidden form fields; empty on public pages.
+    pub fn csrf_token(&self) -> &str {
+        self.csrf.as_deref().unwrap_or_default()
+    }
+
+    pub fn status_label(&self, status: &RepoStatus) -> &str {
+        self.t(match status {
+            RepoStatus::Pending => "status.pending",
+            RepoStatus::Syncing => "status.syncing",
+            RepoStatus::Ok => "status.ok",
+            RepoStatus::Error => "status.error",
+            RepoStatus::Unreachable => "status.unreachable",
+        })
+    }
+
+    /// `2026-11-10 19:04 UTC`.
+    pub fn absolute(&self, ts: &i64) -> String {
+        format::absolute(*ts)
+    }
+
+    /// `5 dk önce`, relative to the render time.
+    pub fn ago(&self, ts: &i64) -> String {
+        format::relative(&self.tr, self.now, *ts)
+    }
+
+    pub fn bytes(&self, size: &i64) -> String {
+        format::bytes(self.tr.lang(), *size)
+    }
+
+    /// Takes a value: askama passes a computed expression such as
+    /// `end - start` by value.
+    pub fn duration(&self, seconds: i64) -> String {
+        format::duration(&self.tr, seconds)
     }
 
     pub fn private(
@@ -140,28 +193,11 @@ pub fn render<T: Template>(page: &T) -> Result<Html<String>, AppError> {
     page.render().map(Html).map_err(AppError::internal)
 }
 
-#[derive(Template)]
-#[template(path = "home.html")]
-struct HomePage {
-    layout: Layout,
-}
-
-pub async fn home(
-    State(state): State<AppState>,
-    prefs: Prefs,
-    Extension(session): Extension<CurrentSession>,
-    OriginalUri(uri): OriginalUri,
-) -> Result<Response, AppError> {
-    let page = HomePage {
-        layout: Layout::private(&state, prefs, &session, Nav::Repos, uri.path()),
-    };
-    Ok(render(&page)?.into_response())
-}
-
 pub async fn static_file(Path(file): Path<String>) -> Response {
     let (body, content_type) = match file.as_str() {
         "app.css" => (APP_CSS, "text/css; charset=utf-8"),
         "htmx.min.js" => (HTMX_JS, "text/javascript; charset=utf-8"),
+        "favicon.svg" => (FAVICON_SVG, "image/svg+xml"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     (

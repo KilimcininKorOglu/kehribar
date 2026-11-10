@@ -19,8 +19,9 @@ sha2 = "0.11"
 sqlx = { version = "0.9", default-features = false, features = ["derive", "macros", "migrate", "runtime-tokio", "sqlite"] }
 subtle = "2.6"
 thiserror = "2.0"
-time = "0.3"
+time = { version = "0.3", features = ["formatting", "macros"] }
 toml = "1"
+url = "2.5"
 tokio = { version = "1.54", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
