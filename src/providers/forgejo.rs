@@ -32,7 +32,7 @@ pub async fn list(
         SourceKind::Starred => api.url(&["users", name, "starred"])?,
         SourceKind::Gists => return Err(ProviderError::kind(Provider::Forgejo, kind)),
     };
-    let repos: Vec<Repo> = api.paged_until_empty(url, "limit", LIMIT).await?;
+    let repos: Vec<Repo> = api.pages(url, "limit", LIMIT, |len| len == 0).await?;
     Ok(repos
         .into_iter()
         .map(|repo| RemoteRepo {

@@ -173,17 +173,6 @@ impl Api {
         self.pages(url, size_param, size, |len| len < size).await
     }
 
-    /// Like [`Api::paged`], but reads until an empty page: for a server that
-    /// may answer with fewer items per page than the size asked for.
-    async fn paged_until_empty<T: DeserializeOwned>(
-        &self,
-        url: Url,
-        size_param: &str,
-        size: usize,
-    ) -> Result<Vec<T>, ProviderError> {
-        self.pages(url, size_param, size, |len| len == 0).await
-    }
-
     /// Reads pages until `last` says, from the number of items of a page,
     /// that it was the last one.
     async fn pages<T: DeserializeOwned>(
