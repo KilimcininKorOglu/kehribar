@@ -12,15 +12,16 @@ use sqlx::{SqliteConnection, SqlitePool};
 use thiserror::Error;
 
 use crate::crypto::Cipher;
-use crate::db::hosts::{self, Host, HostInput, ImportedHost, Provider};
+use crate::db::hosts::{self, Host, HostInput, ImportedHost};
 use crate::db::repos::{self, NewRepo, Repo};
 use crate::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use crate::db::unix_now;
+use crate::providers;
 use crate::repo_url::{self, GIST_HOST, RepoLocation};
-use crate::settings::CONCURRENCY_RANGE;
 use crate::web::form::optional_text;
+use crate::web::hosts::{CheckedHost, HostValues, check_host};
 use crate::web::repos::{CheckedSettings, SettingsInput, check_settings};
-use crate::{name_filter, providers, ref_filter};
+use crate::web::sources::{OptionsInput, check_kind_and_name, check_options};
 
 /// The version of the file layout. An import refuses any other version.
 pub const FORMAT: u32 = 1;
@@ -309,32 +310,14 @@ fn text(value: Option<&String>) -> Option<&str> {
     optional_text(value.map(String::as_str))
 }
 
-struct ValidHost {
-    host: String,
-    provider: Provider,
-    api_base_url: Option<String>,
-    ref_exclude: Option<String>,
-}
-
 /// Applies the checks of the host form. The `Err` is the message key.
-fn check_host(entry: &HostEntry) -> Result<ValidHost, &'static str> {
-    let host = repo_url::parse_host(&entry.host).ok_or("hosts.invalid_host")?;
-    let provider = Provider::parse(&entry.provider).ok_or("hosts.invalid_provider")?;
-    let api_base_url = repo_url::parse_api_url(text(entry.api_base_url.as_ref()).unwrap_or(""))
-        .map_err(|err| err.message_key())?;
-    let ref_exclude = ref_filter::normalize(text(entry.ref_exclude.as_ref()).unwrap_or(""))
-        .map_err(|_| "refs.invalid")?;
-    if entry
-        .max_concurrency
-        .is_some_and(|limit| !CONCURRENCY_RANGE.contains(&limit))
-    {
-        return Err("hosts.invalid_concurrency");
-    }
-    Ok(ValidHost {
-        host,
-        provider,
-        api_base_url,
-        ref_exclude,
+fn check_entry_host(entry: &HostEntry) -> Result<CheckedHost, &'static str> {
+    check_host(&HostValues {
+        host: &entry.host,
+        provider: &entry.provider,
+        api_base_url: text(entry.api_base_url.as_ref()).unwrap_or(""),
+        ref_exclude: text(entry.ref_exclude.as_ref()).unwrap_or(""),
+        max_concurrency: entry.max_concurrency,
     })
 }
 
@@ -349,7 +332,7 @@ async fn import_host(
         name: entry.host.clone(),
         outcome,
     };
-    let valid = match check_host(entry) {
+    let valid = match check_entry_host(entry) {
         Ok(valid) => valid,
         Err(key) => return Ok(row(Outcome::Invalid(key))),
     };
@@ -368,7 +351,7 @@ async fn import_host(
             token_enc: token.bytes.as_deref(),
         },
         ref_exclude: valid.ref_exclude.as_deref(),
-        max_concurrency: entry.max_concurrency,
+        max_concurrency: valid.max_concurrency,
         ssh_key,
     };
     let outcome = match hosts::insert_imported(conn, &host, now).await? {
@@ -391,29 +374,20 @@ fn check_source(host: Option<&Host>, entry: &SourceEntry) -> Result<ValidSource,
     if !providers::can_list(host.provider) {
         return Err("transfer.host_cannot_list");
     }
-    let kind = SourceKind::parse(&entry.id.kind).ok_or("sources.invalid_kind")?;
-    if !providers::supports(host, kind) {
-        return Err("sources.kind_unsupported");
-    }
-    let depth = providers::name_depth(host.provider, kind);
-    let name = repo_url::parse_owner(&entry.id.name, depth > 1)
-        .filter(|name| name.split('/').count() <= depth)
-        .ok_or("sources.invalid_name")?;
-    let patterns = |value: Option<&String>| {
-        name_filter::normalize(text(value).unwrap_or("")).map_err(|_| "sources.invalid_pattern")
-    };
+    let (kind, name) = check_kind_and_name(host, &entry.id.kind, &entry.id.name)?;
+    let options = check_options(&OptionsInput {
+        auto_add: entry.auto_add,
+        include_forks: entry.include_forks,
+        skip_archived: entry.skip_archived,
+        include_patterns: text(entry.include_patterns.as_ref()).unwrap_or(""),
+        exclude_patterns: text(entry.exclude_patterns.as_ref()).unwrap_or(""),
+        use_ssh: entry.use_ssh,
+    })?;
     Ok(ValidSource {
         host_id: host.id,
         kind,
         name,
-        options: SourceOptions {
-            auto_add: entry.auto_add,
-            include_forks: entry.include_forks,
-            skip_archived: entry.skip_archived,
-            include_patterns: patterns(entry.include_patterns.as_ref())?,
-            exclude_patterns: patterns(entry.exclude_patterns.as_ref())?,
-            use_ssh: entry.use_ssh,
-        },
+        options,
     })
 }
 

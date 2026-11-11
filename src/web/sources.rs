@@ -11,6 +11,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
+use super::AppState;
 use super::form::is_checked;
 use super::pages::{Layout, Nav, render};
 use super::repos::{NoticeQuery, PageContext};
@@ -189,42 +190,48 @@ pub async fn list(
     list_page(&ctx, SourceFields::blank(), notice, None).await
 }
 
-/// Checks the form. The inner `Err` carries the message key to show.
-async fn validate(
-    ctx: &PageContext,
-    form: &SourceForm,
-) -> Result<Result<(Host, SourceKind, String), &'static str>, AppError> {
-    let host = match form.host_id.parse() {
-        Ok(id) => hosts::get(&ctx.state.pool, id).await?,
-        Err(_) => None,
-    };
-    let Some(host) = host.filter(|h| providers::can_list(h.provider)) else {
-        return Ok(Err("sources.invalid_host"));
-    };
-    let Some(kind) = SourceKind::parse(&form.kind) else {
-        return Ok(Err("sources.invalid_kind"));
-    };
-    if !providers::supports(&host, kind) {
-        return Ok(Err("sources.kind_unsupported"));
+/// Checks the kind and the name of a source of `host`; the error is the
+/// message key.
+pub(crate) fn check_kind_and_name(
+    host: &Host,
+    kind: &str,
+    name: &str,
+) -> Result<(SourceKind, String), &'static str> {
+    let kind = SourceKind::parse(kind).ok_or("sources.invalid_kind")?;
+    if !providers::supports(host, kind) {
+        return Err("sources.kind_unsupported");
     }
     let depth = providers::name_depth(host.provider, kind);
-    let name = repo_url::parse_owner(&form.name, depth > 1)
-        .filter(|name| name.split('/').count() <= depth);
-    let Some(name) = name else {
-        return Ok(Err("sources.invalid_name"));
-    };
-    Ok(Ok((host, kind, name)))
+    let name = repo_url::parse_owner(name, depth > 1)
+        .filter(|name| name.split('/').count() <= depth)
+        .ok_or("sources.invalid_name")?;
+    Ok((kind, name))
 }
 
-pub async fn create(ctx: PageContext, Form(form): Form<SourceForm>) -> Result<Response, AppError> {
-    let fields = SourceFields::from_form(&form);
-    let checked = match validate(&ctx, &form).await? {
-        Ok(valid) => form.options.parse().map(|options| (valid, options)),
-        Err(key) => Err(key),
+/// The host `host_id` when it can list repositories.
+async fn listing_host(state: &AppState, host_id: Option<i64>) -> Result<Option<Host>, AppError> {
+    let Some(id) = host_id else {
+        return Ok(None);
     };
-    let ((host, kind, name), options) = match checked {
+    let host = hosts::get(&state.pool, id).await?;
+    Ok(host.filter(|h| providers::can_list(h.provider)))
+}
+
+/// Adds a source of the host `host_id` and starts its first scan; returns
+/// its id. The inner `Err` carries the message key.
+pub(super) async fn add_source(
+    state: &AppState,
+    host_id: Option<i64>,
+    kind: &str,
+    name: &str,
+    options: SourceOptions,
+) -> Result<Result<i64, &'static str>, AppError> {
+    let Some(host) = listing_host(state, host_id).await? else {
+        return Ok(Err("sources.invalid_host"));
+    };
+    let (kind, name) = match check_kind_and_name(&host, kind, name) {
         Ok(checked) => checked,
-        Err(key) => return list_page(&ctx, fields, None, Some(key)).await,
+        Err(key) => return Ok(Err(key)),
     };
     let new = NewSource {
         host_id: host.id,
@@ -232,25 +239,41 @@ pub async fn create(ctx: PageContext, Form(form): Form<SourceForm>) -> Result<Re
         name: &name,
         options,
     };
-    let Some(id) = sources::insert(&ctx.state.pool, &new, unix_now()).await? else {
-        return list_page(&ctx, fields, None, Some("sources.exists")).await;
+    let Some(id) = sources::insert(&state.pool, &new, unix_now()).await? else {
+        return Ok(Err("sources.exists"));
     };
     tracing::info!(host = %host.host, %name, "source added");
-    scan_by_id(&ctx, id).await?;
+    start_scan(state, id).await?;
+    Ok(Ok(id))
+}
+
+pub async fn create(ctx: PageContext, Form(form): Form<SourceForm>) -> Result<Response, AppError> {
+    let fields = SourceFields::from_form(&form);
+    let options = match form.options.parse() {
+        Ok(options) => options,
+        Err(key) => return list_page(&ctx, fields, None, Some(key)).await,
+    };
+    let host_id = form.host_id.parse().ok();
+    let added = add_source(&ctx.state, host_id, &form.kind, &form.name, options).await?;
+    if let Err(key) = added {
+        return list_page(&ctx, fields, None, Some(key)).await;
+    }
     Ok(Redirect::to("/sources?notice=added").into_response())
 }
 
-/// Starts a scan in the background; the page shows its result later.
-async fn scan_by_id(ctx: &PageContext, id: i64) -> Result<(), AppError> {
-    let source = sources::get(&ctx.state.pool, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    drop(ctx.state.scheduler.scan_now(source));
-    Ok(())
+/// Starts a scan in the background; `false` when there is no such source.
+pub(super) async fn start_scan(state: &AppState, id: i64) -> Result<bool, AppError> {
+    let Some(source) = sources::get(&state.pool, id).await? else {
+        return Ok(false);
+    };
+    drop(state.scheduler.scan_now(source));
+    Ok(true)
 }
 
 pub async fn scan(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, AppError> {
-    scan_by_id(&ctx, id).await?;
+    if !start_scan(&ctx.state, id).await? {
+        return Err(AppError::NotFound);
+    }
     Ok(Redirect::to("/sources?notice=scanning").into_response())
 }
 
@@ -264,19 +287,39 @@ pub struct OptionsForm {
     use_ssh: Option<String>,
 }
 
+/// The options of a source as the form, the import or the API sends them.
+pub(crate) struct OptionsInput<'a> {
+    pub auto_add: bool,
+    pub include_forks: bool,
+    pub skip_archived: bool,
+    /// Name patterns, one per line.
+    pub include_patterns: &'a str,
+    pub exclude_patterns: &'a str,
+    pub use_ssh: bool,
+}
+
+/// Checks the name patterns of the options; the error is the message key.
+pub(crate) fn check_options(input: &OptionsInput<'_>) -> Result<SourceOptions, &'static str> {
+    let patterns = |text: &str| name_filter::normalize(text).map_err(|_| "sources.invalid_pattern");
+    Ok(SourceOptions {
+        auto_add: input.auto_add,
+        include_forks: input.include_forks,
+        skip_archived: input.skip_archived,
+        include_patterns: patterns(input.include_patterns)?,
+        exclude_patterns: patterns(input.exclude_patterns)?,
+        use_ssh: input.use_ssh,
+    })
+}
+
 impl OptionsForm {
     /// The checked options; the `Err` is the message key to show.
     fn parse(&self) -> Result<SourceOptions, &'static str> {
-        let patterns = |text: &Option<String>| {
-            name_filter::normalize(text.as_deref().unwrap_or_default())
-                .map_err(|_| "sources.invalid_pattern")
-        };
-        Ok(SourceOptions {
+        check_options(&OptionsInput {
             auto_add: is_checked(self.auto_add.as_deref()),
             include_forks: is_checked(self.include_forks.as_deref()),
             skip_archived: is_checked(self.skip_archived.as_deref()),
-            include_patterns: patterns(&self.include_patterns)?,
-            exclude_patterns: patterns(&self.exclude_patterns)?,
+            include_patterns: self.include_patterns.as_deref().unwrap_or_default(),
+            exclude_patterns: self.exclude_patterns.as_deref().unwrap_or_default(),
             use_ssh: is_checked(self.use_ssh.as_deref()),
         })
     }

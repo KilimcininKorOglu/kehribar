@@ -7,9 +7,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
-use super::form::{encrypt_token, is_checked, optional_text};
+use super::AppState;
+use super::form::{encrypt_token, is_checked, optional_number, optional_text};
 use super::pages::{Layout, Nav, render};
 use super::repos::{NoticeQuery, PageContext};
+use crate::crypto::Cipher;
 use crate::db::hosts::{self, Host, HostInput, Provider};
 use crate::db::unix_now;
 use crate::error::AppError;
@@ -122,46 +124,83 @@ pub struct HostForm {
     max_concurrency: Option<String>,
 }
 
-/// A form that passed validation, with the values to store.
-struct ValidHost {
-    host: String,
-    provider: Provider,
-    api_base_url: Option<String>,
-    username: Option<String>,
-    token_enc: Option<Vec<u8>>,
-    ref_exclude: Option<String>,
-    max_concurrency: Option<i64>,
+/// The values of a host as the form, the import or the API sends them.
+pub(crate) struct HostValues<'a> {
+    pub host: &'a str,
+    pub provider: &'a str,
+    pub api_base_url: &'a str,
+    /// Ref patterns, one per line.
+    pub ref_exclude: &'a str,
+    pub max_concurrency: Option<i64>,
 }
 
-/// An empty field gives `None`; a number must lie in the range of the
-/// global concurrency setting.
-fn parse_limit(input: Option<&str>) -> Result<Option<i64>, &'static str> {
-    let Some(text) = optional_text(input) else {
-        return Ok(None);
-    };
-    match text.parse() {
-        Ok(limit) if CONCURRENCY_RANGE.contains(&limit) => Ok(Some(limit)),
-        _ => Err("hosts.invalid_concurrency"),
+/// Host values that passed [`check_host`].
+pub(crate) struct CheckedHost {
+    pub host: String,
+    pub provider: Provider,
+    pub api_base_url: Option<String>,
+    pub ref_exclude: Option<String>,
+    pub max_concurrency: Option<i64>,
+}
+
+/// Applies the checks of the host form; the error is the message key.
+pub(crate) fn check_host(values: &HostValues<'_>) -> Result<CheckedHost, &'static str> {
+    let host = repo_url::parse_host(values.host).ok_or("hosts.invalid_host")?;
+    let provider = Provider::parse(values.provider).ok_or("hosts.invalid_provider")?;
+    let api_base_url =
+        repo_url::parse_api_url(values.api_base_url).map_err(|err| err.message_key())?;
+    let ref_exclude = ref_filter::normalize(values.ref_exclude).map_err(|_| "refs.invalid")?;
+    if values
+        .max_concurrency
+        .is_some_and(|limit| !CONCURRENCY_RANGE.contains(&limit))
+    {
+        return Err("hosts.invalid_concurrency");
     }
+    Ok(CheckedHost {
+        host,
+        provider,
+        api_base_url,
+        ref_exclude,
+        max_concurrency: values.max_concurrency,
+    })
+}
+
+/// A host that passed the checks, with the values to store.
+pub(super) struct ValidHost {
+    checked: CheckedHost,
+    username: Option<String>,
+    token_enc: Option<Vec<u8>>,
 }
 
 impl ValidHost {
     fn input(&self) -> HostInput<'_> {
         HostInput {
-            host: &self.host,
-            provider: self.provider,
-            api_base_url: self.api_base_url.as_deref(),
+            host: &self.checked.host,
+            provider: self.checked.provider,
+            api_base_url: self.checked.api_base_url.as_deref(),
             username: self.username.as_deref(),
             token_enc: self.token_enc.as_deref(),
         }
     }
+}
 
-    /// Stores the values that [`HostInput`] does not carry.
-    async fn save_extras(&self, pool: &sqlx::SqlitePool, id: i64) -> sqlx::Result<()> {
-        hosts::set_ref_exclude(pool, id, self.ref_exclude.as_deref()).await?;
-        hosts::set_max_concurrency(pool, id, self.max_concurrency).await?;
-        Ok(())
-    }
+/// Checks the values and encrypts the token. The inner `Err` carries the
+/// message key.
+pub(super) fn valid_host(
+    cipher: &Cipher,
+    values: &HostValues<'_>,
+    username: Option<&str>,
+    token: Option<&str>,
+) -> Result<Result<ValidHost, &'static str>, AppError> {
+    let checked = match check_host(values) {
+        Ok(checked) => checked,
+        Err(key) => return Ok(Err(key)),
+    };
+    Ok(Ok(ValidHost {
+        checked,
+        username: optional_text(username).map(str::to_owned),
+        token_enc: encrypt_token(cipher, token)?,
+    }))
 }
 
 /// Checks the form. The inner `Err` carries the message key to show.
@@ -169,37 +208,53 @@ fn validate(
     ctx: &PageContext,
     form: &HostForm,
 ) -> Result<Result<ValidHost, &'static str>, AppError> {
-    let Some(host) = repo_url::parse_host(&form.host) else {
-        return Ok(Err("hosts.invalid_host"));
+    let Ok(max_concurrency) = optional_number(form.max_concurrency.as_deref(), CONCURRENCY_RANGE)
+    else {
+        return Ok(Err("hosts.invalid_concurrency"));
     };
-    let Some(provider) = Provider::parse(&form.provider) else {
-        return Ok(Err("hosts.invalid_provider"));
-    };
-    let api_base_url = match repo_url::parse_api_url(form.api_base_url.as_deref().unwrap_or("")) {
-        Ok(url) => url,
-        Err(err) => return Ok(Err(err.message_key())),
-    };
-    let Ok(ref_exclude) = ref_filter::normalize(form.ref_exclude.as_deref().unwrap_or("")) else {
-        return Ok(Err("refs.invalid"));
-    };
-    let max_concurrency = match parse_limit(form.max_concurrency.as_deref()) {
-        Ok(limit) => limit,
-        Err(key) => return Ok(Err(key)),
-    };
-    Ok(Ok(ValidHost {
+    let values = HostValues {
+        host: &form.host,
+        provider: &form.provider,
+        api_base_url: form.api_base_url.as_deref().unwrap_or(""),
+        ref_exclude: form.ref_exclude.as_deref().unwrap_or(""),
         max_concurrency,
-        host,
-        provider,
-        api_base_url,
-        username: optional_text(form.username.as_deref()).map(str::to_owned),
-        token_enc: encrypt_token(&ctx.state.cipher, form.token.as_deref())?,
-        ref_exclude,
-    }))
+    };
+    let (username, token) = (form.username.as_deref(), form.token.as_deref());
+    valid_host(&ctx.state.cipher, &values, username, token)
 }
 
 fn is_unique_violation(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .is_some_and(|db| db.is_unique_violation())
+}
+
+/// Stores a new host, or with `id` the changes of that host, and returns
+/// its id. Without a new token, `clear_token` removes the stored one. The
+/// inner `Err` carries the message key.
+pub(super) async fn save_host(
+    state: &AppState,
+    id: Option<i64>,
+    valid: &ValidHost,
+    clear_token: bool,
+) -> Result<Result<i64, &'static str>, AppError> {
+    let pool = &state.pool;
+    let (input, now) = (valid.input(), unix_now());
+    let saved = match id {
+        None => hosts::insert(pool, &input, now).await,
+        Some(id) => hosts::update(pool, id, &input, now).await.map(|_| id),
+    };
+    let id = match saved {
+        Ok(id) => id,
+        Err(err) if is_unique_violation(&err) => return Ok(Err("hosts.exists")),
+        Err(err) => return Err(err.into()),
+    };
+    hosts::set_ref_exclude(pool, id, valid.checked.ref_exclude.as_deref()).await?;
+    hosts::set_max_concurrency(pool, id, valid.checked.max_concurrency).await?;
+    if valid.token_enc.is_none() && clear_token {
+        hosts::clear_token(pool, id).await?;
+    }
+    tracing::info!(host = %valid.checked.host, "host saved");
+    Ok(Ok(id))
 }
 
 /// Maps the `notice` query value to a message key, ignoring anything else.
@@ -253,15 +308,9 @@ pub async fn create(ctx: PageContext, Form(form): Form<HostForm>) -> Result<Resp
         Ok(valid) => valid,
         Err(key) => return list_page(&ctx, fields, None, Some(key)).await,
     };
-    let id = match hosts::insert(&ctx.state.pool, &valid.input(), unix_now()).await {
-        Ok(id) => id,
-        Err(err) if is_unique_violation(&err) => {
-            return list_page(&ctx, fields, None, Some("hosts.exists")).await;
-        }
-        Err(err) => return Err(err.into()),
-    };
-    valid.save_extras(&ctx.state.pool, id).await?;
-    tracing::info!(host = %valid.host, "host added");
+    if let Err(key) = save_host(&ctx.state, None, &valid, false).await? {
+        return list_page(&ctx, fields, None, Some(key)).await;
+    }
     Ok(Redirect::to("/hosts?notice=saved").into_response())
 }
 
@@ -339,19 +388,11 @@ pub async fn update(
         Ok(valid) => valid,
         Err(key) => return edit_page(&ctx, host, fields, Some(key), true).await,
     };
-    match hosts::update(&ctx.state.pool, id, &valid.input(), unix_now()).await {
-        Ok(_) => {}
-        Err(err) if is_unique_violation(&err) => {
-            return edit_page(&ctx, host, fields, Some("hosts.exists"), true).await;
-        }
-        Err(err) => return Err(err.into()),
-    }
-    valid.save_extras(&ctx.state.pool, id).await?;
     // A new token wins over the clear box.
-    if valid.token_enc.is_none() && is_checked(form.clear_token.as_deref()) {
-        hosts::clear_token(&ctx.state.pool, id).await?;
+    let clear = is_checked(form.clear_token.as_deref());
+    if let Err(key) = save_host(&ctx.state, Some(id), &valid, clear).await? {
+        return edit_page(&ctx, host, fields, Some(key), true).await;
     }
-    tracing::info!(host = %valid.host, "host updated");
     Ok(Redirect::to("/hosts?notice=saved").into_response())
 }
 

@@ -5,9 +5,10 @@ use axum::extract::Path;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
+use super::AppState;
 use super::hosts::{edit_error, load_host};
 use super::repos::PageContext;
-use crate::db::hosts;
+use crate::db::hosts::{self, Host};
 use crate::error::AppError;
 use crate::git::ssh::{self, SshError};
 
@@ -21,14 +22,36 @@ fn back_to_host(id: i64, notice: &str) -> Response {
 }
 
 /// Encrypts the private key and stores it with its public line.
-async fn store(ctx: &PageContext, id: i64, private: &str, public: &str) -> Result<(), AppError> {
-    let encrypted = ctx
-        .state
-        .cipher
-        .encrypt(private)
-        .map_err(AppError::internal)?;
-    hosts::set_ssh_key(&ctx.state.pool, id, Some((&encrypted, public))).await?;
+async fn store(state: &AppState, id: i64, private: &str, public: &str) -> Result<(), AppError> {
+    let encrypted = state.cipher.encrypt(private).map_err(AppError::internal)?;
+    hosts::set_ssh_key(&state.pool, id, Some((&encrypted, public))).await?;
     Ok(())
+}
+
+/// Stores a pasted private key, after `ssh-keygen` read its public line.
+/// The inner `Err` carries the message key.
+pub(super) async fn store_pasted(
+    state: &AppState,
+    host: &Host,
+    pasted: &str,
+) -> Result<Result<(), &'static str>, AppError> {
+    // Pasting often turns line ends into CRLF, which OpenSSH refuses.
+    let private = pasted.replace("\r\n", "\n");
+    let private = private.trim();
+    if private.is_empty() {
+        return Ok(Err("hosts.ssh_key_missing"));
+    }
+    let public = match ssh::public_key(&state.config.tmp_dir(), private).await {
+        Ok(public) => public,
+        Err(SshError::Keygen(err)) => {
+            tracing::info!(host = %host.host, %err, "pasted SSH key refused");
+            return Ok(Err("hosts.ssh_key_invalid"));
+        }
+        Err(err) => return Err(AppError::internal(err)),
+    };
+    store(state, host.id, private, &public).await?;
+    tracing::info!(host = %host.host, "SSH key stored");
+    Ok(Ok(()))
 }
 
 /// Creates a new ed25519 key for the host. Its public line is shown on the
@@ -39,7 +62,7 @@ pub async fn generate(ctx: PageContext, Path(id): Path<i64>) -> Result<Response,
     let pair = ssh::generate(&ctx.state.config.tmp_dir(), &comment)
         .await
         .map_err(AppError::internal)?;
-    store(&ctx, id, &pair.private, &pair.public).await?;
+    store(&ctx.state, id, &pair.private, &pair.public).await?;
     tracing::info!(host = %host.host, "SSH key generated");
     Ok(back_to_host(id, "ssh_saved"))
 }
@@ -51,22 +74,9 @@ pub async fn paste(
     Form(form): Form<KeyForm>,
 ) -> Result<Response, AppError> {
     let host = load_host(&ctx, id).await?;
-    // Pasting often turns line ends into CRLF, which OpenSSH refuses.
-    let private = form.private_key.replace("\r\n", "\n");
-    let private = private.trim();
-    if private.is_empty() {
-        return edit_error(&ctx, host, "hosts.ssh_key_missing").await;
+    if let Err(key) = store_pasted(&ctx.state, &host, &form.private_key).await? {
+        return edit_error(&ctx, host, key).await;
     }
-    let public = match ssh::public_key(&ctx.state.config.tmp_dir(), private).await {
-        Ok(public) => public,
-        Err(SshError::Keygen(err)) => {
-            tracing::info!(host = %host.host, %err, "pasted SSH key refused");
-            return edit_error(&ctx, host, "hosts.ssh_key_invalid").await;
-        }
-        Err(err) => return Err(AppError::internal(err)),
-    };
-    store(&ctx, id, private, &public).await?;
-    tracing::info!(host = %host.host, "SSH key stored");
     Ok(back_to_host(id, "ssh_saved"))
 }
 
