@@ -48,6 +48,7 @@ async fn a_webhook_call_syncs_the_repository() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let (_, html) = page(&t, "/repos/1?notice=webhook_created").await;
     assert!(html.contains("hazır. Kaynak sunucuya ekleyin."), "{html}");
+    assert!(html.contains("GitLab: Settings → Webhooks"), "{html}");
     let path = webhook_path(&t).await.expect("a webhook URL");
     // The page shows the full URL; the token is stored encrypted.
     assert!(html.contains(&format!("http://localhost{path}")), "{html}");

@@ -53,6 +53,14 @@
   {% if let Some(url) = webhook_url %}
   <pre class="clone-command"><code>{{ url }}</code></pre>
   <p class="muted small">{{ layout.t("webhook.setup") }}</p>
+  <ul class="muted small webhook-where">
+    <li>{{ layout.t("webhook.where_github") }}</li>
+    <li>{{ layout.t("webhook.where_gitlab") }}</li>
+    <li>{{ layout.t("webhook.where_forgejo") }}</li>
+    <li>{{ layout.t("webhook.where_bitbucket") }}</li>
+    <li>{{ layout.t("webhook.where_azure") }}</li>
+    <li>{{ layout.t("webhook.where_gitee") }}</li>
+  </ul>
   <div class="actions">
     <form method="post" action="/repos/{{ repo.id }}/webhook">
       <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
