@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod name_filter;
 pub mod notify;
 pub mod providers;
+pub mod proxy;
 pub mod ref_filter;
 pub mod repo_url;
 pub mod settings;

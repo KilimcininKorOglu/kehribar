@@ -237,6 +237,45 @@ async fn repeated_failures_lock_the_login() {
     assert!(response.headers().get(header::SET_COOKIE).is_none());
 }
 
+fn login_from(client: &str, password: &str) -> Request<Body> {
+    let mut request = login_request(USER, password, "/");
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", client.parse().unwrap());
+    request
+}
+
+#[tokio::test]
+async fn behind_a_trusted_proxy_failures_lock_only_their_client() {
+    let mut config = test_config(std::path::Path::new("/nonexistent/git-archive-test"));
+    // The test connection comes from 192.0.2.7, the proxy.
+    config.trusted_proxies = git_archive::proxy::parse_list("192.0.2.0/24").unwrap();
+    let pool = db::open_in_memory().await.unwrap();
+    let state = AppState::new(pool, config, Catalog::load().unwrap());
+    let app = web::router(state).layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))));
+
+    for _ in 0..git_archive::web::auth::MAX_FAILED_LOGINS {
+        let response = send(&app, login_from("198.51.100.1", "wrong")).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    let locked = send(&app, login_from("198.51.100.1", PASSWORD)).await;
+    assert_eq!(locked.status(), StatusCode::TOO_MANY_REQUESTS);
+    // Another client behind the same proxy still signs in.
+    let other = send(&app, login_from("198.51.100.2", PASSWORD)).await;
+    assert_eq!(other.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn without_a_trusted_proxy_the_forwarded_header_changes_nothing() {
+    let app = app().await;
+    for _ in 0..git_archive::web::auth::MAX_FAILED_LOGINS {
+        send(&app, login_from("198.51.100.1", "wrong")).await;
+    }
+    // A client cannot escape the lock by naming another address.
+    let response = send(&app, login_from("198.51.100.2", PASSWORD)).await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
 #[tokio::test]
 async fn preferences_are_saved_in_cookies_and_applied() {
     let app = app().await;

@@ -34,6 +34,38 @@ pub struct CurrentSession {
     pub csrf_token: String,
 }
 
+/// The address that failed logins count against: the connection's peer,
+/// or the client a trusted reverse proxy names (see [`crate::proxy`]).
+#[derive(Debug, Clone, Copy)]
+pub struct ClientIp(pub IpAddr);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClientIp
+where
+    AppState: axum::extract::FromRef<S>,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let app: AppState = axum::extract::FromRef::from_ref(state);
+        let forwarded = parts
+            .headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|value| value.to_str().ok());
+        Ok(Self(crate::proxy::client_ip(
+            peer.ip(),
+            forwarded,
+            &app.config.trusted_proxies,
+        )))
+    }
+}
+
 /// Returns 32 random bytes as 64 hex characters.
 pub fn new_token() -> Result<String, AppError> {
     let mut bytes = [0u8; 32];
@@ -156,12 +188,11 @@ pub struct LoginForm {
 
 pub async fn login(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     prefs: Prefs,
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<Response, AppError> {
-    let ip = peer.ip();
     let now = Instant::now();
     let next = local_path(form.next.as_deref());
     if state.limiter.is_locked(ip, now) {

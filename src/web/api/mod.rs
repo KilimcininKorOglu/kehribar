@@ -7,10 +7,9 @@ mod repos;
 mod sources;
 mod views;
 
-use std::net::SocketAddr;
 use std::time::Instant;
 
-use axum::extract::{ConnectInfo, FromRequest, FromRequestParts, Path, Request, State};
+use axum::extract::{FromRequest, FromRequestParts, Path, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
@@ -22,7 +21,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::json;
 
 use super::AppState;
-use super::auth::hash_token;
+use super::auth::{ClientIp, hash_token};
 use super::tokens::API_PREFIX;
 use crate::db::tokens::{self, AccessToken, TokenKind};
 use crate::db::unix_now;
@@ -207,11 +206,10 @@ async fn token_of(state: &AppState, hash: Option<Vec<u8>>) -> ApiResult<Option<A
 /// caller's address.
 async fn authenticate(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     request: Request,
     next: Next,
 ) -> Response {
-    let ip = peer.ip();
     let now = Instant::now();
     if state.limiter.is_locked(ip, now) {
         tracing::warn!(%ip, "API request refused, too many failures");

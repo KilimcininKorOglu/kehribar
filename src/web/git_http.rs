@@ -5,18 +5,18 @@
 //! Pushing is refused, and every request needs HTTP Basic authentication:
 //! the admin credentials, or a clone token as the password.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::prelude::{BASE64_STANDARD, Engine as _};
 use tokio_util::io::ReaderStream;
 
 use super::AppState;
-use super::auth::{hash_token, secrets_equal};
+use super::auth::{ClientIp, hash_token, secrets_equal};
 use super::tokens::CLONE_PREFIX;
 use crate::db::repos::{self, Repo};
 use crate::db::tokens::{self, AccessToken, TokenKind};
@@ -177,7 +177,7 @@ fn challenge() -> Response {
 
 pub async fn serve(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     request: Request,
 ) -> Response {
     let uri = request.uri().clone();
@@ -186,7 +186,7 @@ pub async fn serve(
         Ok(found) => found,
         Err(status) => return status.into_response(),
     };
-    let caller = match authenticate(&state, peer.ip(), request.headers()).await {
+    let caller = match authenticate(&state, ip, request.headers()).await {
         Ok(caller) => caller,
         Err(denied) => return denied.into_response(),
     };

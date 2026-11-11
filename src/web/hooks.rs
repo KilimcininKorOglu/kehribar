@@ -2,17 +2,16 @@
 //! source server calls it after a push; the payload is not read, so every
 //! provider works the same way.
 
-use std::net::SocketAddr;
 use std::time::Instant;
 
 use axum::Json;
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde_json::json;
 
 use super::AppState;
-use super::auth::{hash_token, new_token};
+use super::auth::{ClientIp, hash_token, new_token};
 use super::repos::{PageContext, site_url};
 use crate::db::repos;
 use crate::db::unix_now;
@@ -76,10 +75,9 @@ pub async fn remove(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, A
 /// of the caller's address.
 pub async fn receive(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
-    let ip = peer.ip();
     let now = Instant::now();
     if state.limiter.is_locked(ip, now) {
         tracing::warn!(%ip, "webhook refused, too many failures");

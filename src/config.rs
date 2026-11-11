@@ -24,6 +24,7 @@ pub const ENV_REPACK_INTERVAL_DAYS: &str = "GIT_ARCHIVE_REPACK_INTERVAL_DAYS";
 pub const ENV_SESSION_TTL_HOURS: &str = "GIT_ARCHIVE_SESSION_TTL_HOURS";
 pub const ENV_COOKIE_SECURE: &str = "GIT_ARCHIVE_COOKIE_SECURE";
 pub const ENV_LOG_LEVEL: &str = "GIT_ARCHIVE_LOG_LEVEL";
+pub const ENV_TRUSTED_PROXIES: &str = "GIT_ARCHIVE_TRUSTED_PROXIES";
 pub const ENV_PUBLIC_URL: &str = "GIT_ARCHIVE_PUBLIC_URL";
 pub const ENV_NOTIFY_WEBHOOK_URL: &str = "GIT_ARCHIVE_NOTIFY_WEBHOOK_URL";
 pub const ENV_NOTIFY_TELEGRAM_BOT_TOKEN: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_BOT_TOKEN";
@@ -76,6 +77,8 @@ pub struct Config {
     pub repack_interval_days: u32,
     pub session_ttl_hours: u32,
     pub cookie_secure: bool,
+    /// Reverse proxies whose `X-Forwarded-For` names the client.
+    pub trusted_proxies: Vec<crate::proxy::Cidr>,
     pub log_level: String,
     /// Address of this site as users open it, without a trailing slash.
     /// Notifications link to it when it is set.
@@ -189,6 +192,7 @@ impl fmt::Debug for Config {
             .field("repack_interval_days", &self.repack_interval_days)
             .field("session_ttl_hours", &self.session_ttl_hours)
             .field("cookie_secure", &self.cookie_secure)
+            .field("trusted_proxies", &self.trusted_proxies)
             .field("log_level", &self.log_level)
             .field("public_url", &self.public_url)
             .field("notify", &self.notify)
@@ -252,6 +256,7 @@ impl Config {
             repack_interval_days: 7,
             session_ttl_hours: 168,
             cookie_secure: false,
+            trusted_proxies: Vec::new(),
             log_level: String::from("info"),
             public_url: None,
             notify: NotifyConfig::default(),
@@ -313,6 +318,13 @@ impl Config {
         self.data_dir = env.parsed(ENV_DATA_DIR, self.data_dir.clone())?;
         self.session_ttl_hours = env.positive(ENV_SESSION_TTL_HOURS, self.session_ttl_hours)?;
         self.cookie_secure = env.boolean(ENV_COOKIE_SECURE, self.cookie_secure)?;
+        if let Some(list) = env.get(ENV_TRUSTED_PROXIES) {
+            self.trusted_proxies =
+                crate::proxy::parse_list(&list).map_err(|reason| ConfigError::Invalid {
+                    name: ENV_TRUSTED_PROXIES,
+                    reason,
+                })?;
+        }
         self.log_level = env.parsed(ENV_LOG_LEVEL, self.log_level.clone())?;
         Ok(())
     }
@@ -601,6 +613,23 @@ mod tests {
             (config.git_timeout_seconds, config.sync_concurrency),
             (10, 32)
         );
+    }
+
+    #[test]
+    fn trusted_proxies_are_read_and_checked() {
+        assert!(load(&required()).unwrap().trusted_proxies.is_empty());
+        let mut pairs = required();
+        pairs.push((ENV_TRUSTED_PROXIES, "10.0.0.0/8, 172.16.0.0/12 ::1"));
+        assert_eq!(load(&pairs).unwrap().trusted_proxies.len(), 3);
+        let mut pairs = required();
+        pairs.push((ENV_TRUSTED_PROXIES, "10.0.0.0/40"));
+        assert!(matches!(
+            load(&pairs).unwrap_err(),
+            ConfigError::Invalid {
+                name: ENV_TRUSTED_PROXIES,
+                ..
+            }
+        ));
     }
 
     #[test]

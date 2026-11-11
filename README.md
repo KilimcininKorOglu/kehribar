@@ -79,6 +79,7 @@ Every setting is an environment variable. Docker Compose reads them from `.env`.
 | `GIT_ARCHIVE_SESSION_TTL_HOURS` | `168` | Lifetime of a web session. |
 | `GIT_ARCHIVE_COOKIE_SECURE` | `false` | Set to `true` when the site is served over HTTPS. The clone URL on the repository page then uses `https`. |
 | `GIT_ARCHIVE_LOG_LEVEL` | `info` | Log filter, for example `debug` or `git_archive=debug`. |
+| `GIT_ARCHIVE_TRUSTED_PROXIES` | empty | Addresses or ranges of the reverse proxies in front of the app, separated by commas, for example `10.0.0.0/8, 172.16.0.0/12`. For a connection from one of them, the client address comes from `X-Forwarded-For`, so 10 failed logins lock out that client only, not everyone behind the proxy. Empty ignores the header. |
 | `GIT_ARCHIVE_FSCK_INTERVAL_DAYS` | `7` | Days between two `git fsck` runs per repository. `0` turns the check off. |
 | `GIT_ARCHIVE_REPACK_INTERVAL_DAYS` | `7` | Days between two `git repack` runs per repository. `0` turns the repack off. |
 | `GIT_ARCHIVE_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page, and push webhook URLs start with it. |
