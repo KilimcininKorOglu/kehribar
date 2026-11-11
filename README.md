@@ -97,6 +97,8 @@ Every setting is an environment variable. Docker Compose reads them from `.env`.
 | `GIT_ARCHIVE_BACKUP_INTERVAL_HOURS` | `24` | Hours between two backups. |
 | `GIT_ARCHIVE_BACKUP_KEEP` | `7` | Bundles kept per repository. |
 
+A sync, maintenance or backup number outside the range that the settings page accepts stops the start with an error: sync interval 1 to 10080 minutes, concurrency 1 to 32, git timeout 10 to 86400 seconds, fsck and repack interval 0 to 365 days, backup interval 1 to 168 hours, bundles kept 1 to 365.
+
 The settings page can override the sync, maintenance, notification and backup settings. A value saved there wins over the environment value; an empty field returns to the environment value. The Telegram bot token and the S3 secret access key are stored encrypted with the secret key.
 
 ## Excluding refs

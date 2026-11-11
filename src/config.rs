@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -270,8 +271,16 @@ impl Config {
         backup.access_key_id = env.get(ENV_BACKUP_S3_ACCESS_KEY_ID);
         backup.secret_access_key = env.get(ENV_BACKUP_S3_SECRET_ACCESS_KEY);
         backup.path_style = env.boolean(ENV_BACKUP_S3_PATH_STYLE, backup.path_style)?;
-        backup.interval_hours = env.positive(ENV_BACKUP_INTERVAL_HOURS, backup.interval_hours)?;
-        backup.keep = env.positive(ENV_BACKUP_KEEP, backup.keep)?;
+        backup.interval_hours = env.ranged(
+            ENV_BACKUP_INTERVAL_HOURS,
+            backup.interval_hours,
+            crate::backup::settings::INTERVAL_RANGE,
+        )?;
+        backup.keep = env.ranged(
+            ENV_BACKUP_KEEP,
+            backup.keep,
+            crate::backup::settings::KEEP_RANGE,
+        )?;
         Ok(())
     }
 
@@ -312,14 +321,34 @@ impl Config {
     where
         F: Fn(&str) -> Option<String>,
     {
-        self.sync_interval_minutes =
-            env.positive(ENV_SYNC_INTERVAL_MINUTES, self.sync_interval_minutes)?;
-        self.sync_concurrency = env.positive(ENV_SYNC_CONCURRENCY, self.sync_concurrency)?;
-        self.git_timeout_seconds =
-            env.positive(ENV_GIT_TIMEOUT_SECONDS, self.git_timeout_seconds)?;
-        self.fsck_interval_days = env.parsed(ENV_FSCK_INTERVAL_DAYS, self.fsck_interval_days)?;
-        self.repack_interval_days =
-            env.parsed(ENV_REPACK_INTERVAL_DAYS, self.repack_interval_days)?;
+        use crate::settings::{
+            CONCURRENCY_RANGE, GIT_TIMEOUT_RANGE, INTERVAL_RANGE, MAINTENANCE_RANGE,
+        };
+        self.sync_interval_minutes = env.ranged(
+            ENV_SYNC_INTERVAL_MINUTES,
+            self.sync_interval_minutes,
+            INTERVAL_RANGE,
+        )?;
+        self.sync_concurrency = env.ranged(
+            ENV_SYNC_CONCURRENCY,
+            self.sync_concurrency,
+            CONCURRENCY_RANGE,
+        )?;
+        self.git_timeout_seconds = env.ranged(
+            ENV_GIT_TIMEOUT_SECONDS,
+            self.git_timeout_seconds,
+            GIT_TIMEOUT_RANGE,
+        )?;
+        self.fsck_interval_days = env.ranged(
+            ENV_FSCK_INTERVAL_DAYS,
+            self.fsck_interval_days,
+            MAINTENANCE_RANGE,
+        )?;
+        self.repack_interval_days = env.ranged(
+            ENV_REPACK_INTERVAL_DAYS,
+            self.repack_interval_days,
+            MAINTENANCE_RANGE,
+        )?;
         Ok(())
     }
 }
@@ -378,6 +407,30 @@ where
             });
         }
         Ok(value)
+    }
+
+    /// A whole number inside `range`, the range the settings page accepts
+    /// for the same value.
+    fn ranged<T>(
+        &self,
+        name: &'static str,
+        default: T,
+        range: RangeInclusive<i64>,
+    ) -> Result<T, ConfigError>
+    where
+        T: TryFrom<i64>,
+    {
+        let Some(value) = self.optional::<i64>(name)? else {
+            return Ok(default);
+        };
+        let invalid = || ConfigError::Invalid {
+            name,
+            reason: format!("must be between {} and {}", range.start(), range.end()),
+        };
+        if !range.contains(&value) {
+            return Err(invalid());
+        }
+        T::try_from(value).map_err(|_| invalid())
     }
 
     /// An http(s) URL without a trailing slash, or `None` when unset.
@@ -520,6 +573,34 @@ mod tests {
                 ConfigError::Invalid { .. }
             ));
         }
+    }
+
+    #[test]
+    fn rejects_numbers_the_settings_page_would_refuse() {
+        for (name, value) in [
+            (ENV_GIT_TIMEOUT_SECONDS, "5"),
+            (ENV_SYNC_CONCURRENCY, "1000"),
+            (ENV_SYNC_INTERVAL_MINUTES, "10081"),
+            (ENV_FSCK_INTERVAL_DAYS, "366"),
+            (ENV_REPACK_INTERVAL_DAYS, "-1"),
+            (ENV_BACKUP_INTERVAL_HOURS, "169"),
+            (ENV_BACKUP_KEEP, "366"),
+        ] {
+            let mut pairs = required();
+            pairs.push((name, value));
+            assert!(
+                matches!(load(&pairs).unwrap_err(), ConfigError::Invalid { name: n, .. } if n == name),
+                "{name}={value}"
+            );
+        }
+        let mut pairs = required();
+        pairs.push((ENV_GIT_TIMEOUT_SECONDS, "10"));
+        pairs.push((ENV_SYNC_CONCURRENCY, "32"));
+        let config = load(&pairs).unwrap();
+        assert_eq!(
+            (config.git_timeout_seconds, config.sync_concurrency),
+            (10, 32)
+        );
     }
 
     #[test]
