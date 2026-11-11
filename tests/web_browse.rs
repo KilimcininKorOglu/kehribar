@@ -398,6 +398,16 @@ async fn unsafe_or_unknown_input_is_not_found() {
 }
 
 #[tokio::test]
+async fn the_preference_form_returns_to_the_same_file() {
+    let (t, _) = archived().await;
+    let html = page(&t, "/repos/1/blob?path=main.rs").await;
+    assert!(
+        html.contains("name=\"back\" value=\"/repos/1/blob?path=main.rs\""),
+        "{html}"
+    );
+}
+
+#[tokio::test]
 async fn a_nul_byte_in_the_input_is_never_a_server_error() {
     let (t, _) = archived().await;
     // git takes no NUL byte in an argument.

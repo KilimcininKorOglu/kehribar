@@ -64,7 +64,11 @@ where
             state: axum::extract::FromRef::from_ref(state),
             prefs: Prefs::from_headers(&parts.headers),
             session,
-            path: parts.uri.path().to_owned(),
+            // With the query: the preference form returns to the same view.
+            path: parts
+                .uri
+                .path_and_query()
+                .map_or_else(|| parts.uri.path().to_owned(), |pq| pq.as_str().to_owned()),
             host: parts
                 .headers
                 .get(axum::http::header::HOST)
