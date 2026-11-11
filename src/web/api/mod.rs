@@ -62,6 +62,17 @@ impl ApiError {
         Self::new(status, key, message)
     }
 
+    /// A value the checks refused: `409` when the key says that the record
+    /// exists already, else `422`.
+    pub fn rejected(state: &AppState, key: &'static str) -> Self {
+        let status = if key.ends_with(".exists") {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::UNPROCESSABLE_ENTITY
+        };
+        Self::refused(state, status, key)
+    }
+
     fn internal(err: impl std::fmt::Display) -> Self {
         // The detail can name paths or commands, so it goes to the log only.
         tracing::error!(%err, "API request failed");
@@ -112,6 +123,18 @@ pub fn found<T>(record: Option<T>) -> ApiResult<T> {
     record.ok_or_else(ApiError::not_found)
 }
 
+/// A `202` answer for work that runs in the background.
+pub type Accepted = (StatusCode, Json<serde_json::Value>);
+
+/// `{"<flag>": true}` with `202` when the work `started`, else `404`
+/// because its record does not exist.
+pub fn accepted(started: bool, flag: &str) -> ApiResult<Accepted> {
+    if !started {
+        return Err(ApiError::not_found());
+    }
+    Ok((StatusCode::ACCEPTED, Json(json!({ flag: true }))))
+}
+
 /// The record id of the `{id}` path segment; any other text is a `404`
 /// answer in the API's error shape.
 pub struct Id(pub i64);
@@ -142,6 +165,11 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
                 ApiError::new(rejection.status(), "invalid_body", rejection.body_text())
             })
     }
+}
+
+/// The default of a body field that is on unless the request says otherwise.
+pub fn yes() -> bool {
+    true
 }
 
 /// Reads a field that may be `null`: an absent field stays `None`, `null`
@@ -227,10 +255,23 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/repos/{id}/runs", get(repos::runs))
         .route("/repos/{id}/credentials", put(repos::credentials))
         .route("/repos/{id}/sync", post(repos::sync))
-        .route("/hosts", get(hosts::list))
-        .route("/hosts/{id}", get(hosts::show))
-        .route("/sources", get(sources::list))
-        .route("/sources/{id}", get(sources::show))
+        .route("/hosts", get(hosts::list).post(hosts::create))
+        .route(
+            "/hosts/{id}",
+            get(hosts::show).patch(hosts::update).delete(hosts::delete),
+        )
+        .route(
+            "/hosts/{id}/ssh-key",
+            put(hosts::put_ssh_key).delete(hosts::delete_ssh_key),
+        )
+        .route("/sources", get(sources::list).post(sources::create))
+        .route(
+            "/sources/{id}",
+            get(sources::show)
+                .patch(sources::update)
+                .delete(sources::delete),
+        )
+        .route("/sources/{id}/scan", post(sources::scan))
         .fallback(unknown_route)
         .layer(from_fn_with_state(state, authenticate))
 }

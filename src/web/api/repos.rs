@@ -5,10 +5,9 @@ use axum::extract::{Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 use super::views::{RepoView, RunView};
-use super::{ApiError, ApiResult, Id, JsonBody, found, present};
+use super::{Accepted, ApiError, ApiResult, Id, JsonBody, accepted, found, present};
 use crate::db::repos::{self, ListFilter, RepoSort, RepoStatus};
 use crate::db::sync_runs::{self, KEEP_PER_REPO};
 use crate::web::AppState;
@@ -141,17 +140,13 @@ pub async fn show(State(state): State<AppState>, Id(id): Id) -> ApiResult<Json<R
     view(&state, id).await
 }
 
-fn yes() -> bool {
-    true
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewRepoBody {
     url: String,
     #[serde(default)]
     interval_minutes: Option<i64>,
-    #[serde(default = "yes")]
+    #[serde(default = "super::yes")]
     wiki_enabled: bool,
     #[serde(default)]
     lfs_enabled: bool,
@@ -288,12 +283,8 @@ pub async fn delete(State(state): State<AppState>, Id(id): Id) -> ApiResult<Stat
 }
 
 /// `POST /repos/{id}/sync`: syncs now, or once more after the running sync.
-pub async fn sync(State(state): State<AppState>, Id(id): Id) -> ApiResult<impl IntoResponse> {
-    if !queue_sync(&state, id).await? {
-        return Err(ApiError::not_found());
-    }
-    let body: Value = json!({ "queued": true });
-    Ok((StatusCode::ACCEPTED, Json(body)))
+pub async fn sync(State(state): State<AppState>, Id(id): Id) -> ApiResult<Accepted> {
+    accepted(queue_sync(&state, id).await?, "queued")
 }
 
 #[derive(Debug, Deserialize)]
