@@ -442,6 +442,14 @@ textarea:focus {
   align-items: center;
 }
 
+/* A row of buttons or a table directly in a card keeps its distance from
+   the next block. */
+.card > * + .actions,
+.card > .actions + *,
+.card > .table-scroll + * {
+  margin-top: 1rem;
+}
+
 .check {
   display: flex;
   gap: 0.5rem;
@@ -555,6 +563,11 @@ textarea:focus {
 .table th.num,
 .table td.num {
   text-align: right;
+}
+
+/* A long URL breaks inside its cell, so the next column stays in view. */
+.table td.url-cell {
+  overflow-wrap: anywhere;
 }
 
 .table tbody tr:last-child td {

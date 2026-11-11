@@ -26,7 +26,7 @@
         {% for row in rows %}
         <tr>
           <td>{{ layout.t(row.kind.label_key()) }}</td>
-          <td class="mono small">{{ row.name }}</td>
+          <td class="mono small url-cell">{{ row.name }}</td>
           <td>
             {% match row.outcome %}
             {% when Outcome::Added %}<span class="badge badge-ok">{{ layout.t("bulk.added") }}</span>

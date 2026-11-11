@@ -65,7 +65,7 @@
       <tbody>
         {% for row in bulk_rows %}
         <tr>
-          <td class="mono small">{{ row.url }}</td>
+          <td class="mono small url-cell">{{ row.url }}</td>
           <td>
             {% match row.outcome %}
             {% when Added::Yes(id) %}<a href="/repos/{{ id }}"><span class="badge badge-ok">{{ layout.t("bulk.added") }}</span></a>
