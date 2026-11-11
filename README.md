@@ -20,6 +20,10 @@ Pull requests, issues and Git LFS objects are not archived.
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
 - Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README, blame, raw files.
 - Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
+- Ref exclude patterns per host and per repository, for example `refs/pull/*`.
+- Scheduled integrity checks (`git fsck`) and disk maintenance (`git repack`) of every archive.
+- Webhook and Telegram notifications when a repository, a source scan or the backup fails and when it works again.
+- Daily `git bundle` backups to S3-compatible storage (AWS S3, Cloudflare R2, Backblaze B2, MinIO and others).
 - One admin account, light and dark themes, Turkish and English.
 
 ## Quick start
@@ -62,8 +66,73 @@ Every setting is an environment variable. Docker Compose reads them from `.env`.
 | `GIT_ARCHIVE_SESSION_TTL_HOURS` | `168` | Lifetime of a web session. |
 | `GIT_ARCHIVE_COOKIE_SECURE` | `false` | Set to `true` when the site is served over HTTPS. The clone URL on the repository page then uses `https`. |
 | `GIT_ARCHIVE_LOG_LEVEL` | `info` | Log filter, for example `debug` or `git_archive=debug`. |
+| `GIT_ARCHIVE_FSCK_INTERVAL_DAYS` | `7` | Days between two `git fsck` runs per repository. `0` turns the check off. |
+| `GIT_ARCHIVE_REPACK_INTERVAL_DAYS` | `7` | Days between two `git repack` runs per repository. `0` turns the repack off. |
+| `GIT_ARCHIVE_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page. |
+| `GIT_ARCHIVE_NOTIFY_WEBHOOK_URL` | empty | Every notification is POSTed to this URL as JSON. |
+| `GIT_ARCHIVE_NOTIFY_TELEGRAM_BOT_TOKEN` | empty | Telegram bot token from BotFather. |
+| `GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_ID` | empty | Chat that receives the Telegram notifications. |
+| `GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL` | `https://api.telegram.org` | Telegram Bot API server. Change it only for a self-hosted Bot API server. |
+| `GIT_ARCHIVE_NOTIFY_LANG` | `tr` | Language of the notification text: `tr` or `en`. |
+| `GIT_ARCHIVE_BACKUP_S3_ENDPOINT` | empty | S3 endpoint, for example `https://s3.eu-central-1.amazonaws.com`. |
+| `GIT_ARCHIVE_BACKUP_S3_REGION` | `us-east-1` | Region used to sign the requests. |
+| `GIT_ARCHIVE_BACKUP_S3_BUCKET` | empty | Bucket that receives the bundles. |
+| `GIT_ARCHIVE_BACKUP_S3_PREFIX` | empty | Key prefix of the bundles. |
+| `GIT_ARCHIVE_BACKUP_S3_ACCESS_KEY_ID` | empty | Access key ID. |
+| `GIT_ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY` | empty | Secret access key. |
+| `GIT_ARCHIVE_BACKUP_S3_PATH_STYLE` | `false` | `true` puts the bucket name into the path instead of the host name. MinIO and most self-hosted storage need it. |
+| `GIT_ARCHIVE_BACKUP_INTERVAL_HOURS` | `24` | Hours between two backups. |
+| `GIT_ARCHIVE_BACKUP_KEEP` | `7` | Bundles kept per repository. |
 
-The settings page can override the sync interval, the concurrency and the git timeout. A value saved there wins over the environment value; an empty field returns to the environment value.
+The settings page can override the sync, maintenance, notification and backup settings. A value saved there wins over the environment value; an empty field returns to the environment value. The Telegram bot token and the S3 secret access key are stored encrypted with the secret key.
+
+## Excluding refs
+
+A host and a repository can each have a list of ref patterns, one per line, for example `refs/pull/*` or `refs/merge-requests/*`. The patterns of the host and of the repository together are left out of every later fetch. Refs that the archive already holds stay. A pattern starts with `refs/`, holds at most one `*`, and cannot name the `refs/git-archive/` refs.
+
+## Integrity checks and maintenance
+
+After a successful sync, git-archive runs `git fsck` when the check interval has passed, and `git pack-refs --all` followed by `git repack -a -d --keep-unreachable` when the repack interval has passed. The repack keeps every object, including the rewritten history. A failed check marks the repository "Error", and the check runs again after every sync until it passes. The repository page shows the time of the last check and of the last repack, and the space the repack saved.
+
+## Notifications
+
+A notification is sent when a repository changes to "Error" or "source unreachable", when a source scan fails, and when the backup fails, and once more when it works again. While an error lasts, it is not sent again. Set a webhook URL, a Telegram bot and chat, or both. The settings page has a button that sends a test notification.
+
+The webhook body is JSON:
+
+```json
+{
+  "event": "repo_failed",
+  "text": "git-archive: github.com/owner/name could not be synced. ...",
+  "content": "git-archive: github.com/owner/name could not be synced. ...",
+  "repo": { "id": 1, "name": "github.com/owner/name", "url": "https://github.com/owner/name" },
+  "source": null,
+  "status": "unreachable",
+  "previous_status": "ok",
+  "message": "...",
+  "at": 1794336958,
+  "link": "https://archive.example.com/repos/1"
+}
+```
+
+`event` is one of `repo_failed`, `repo_recovered`, `source_failed`, `source_recovered`, `backup_failed`, `backup_recovered` and `test`. `content` repeats `text` so that Discord webhooks work without changes; Slack incoming webhooks read `text`. Fields that do not apply to an event are `null`; `source` holds the source name of a source scan event.
+
+## Backups
+
+When the endpoint, the bucket, the access key ID and the secret access key are set, git-archive uploads a full `git bundle` of every repository whose refs changed since its last upload, once per backup interval. The wiki gets its own bundle. The keys are:
+
+```
+<prefix>/<host>/<owner>/<name>/<unix-time>.bundle
+<prefix>/<host>/<owner>/<name>.wiki/<unix-time>.bundle
+```
+
+After an upload, the oldest bundles beyond the number to keep are deleted. Bundles are not encrypted; use a private bucket or the server-side encryption of the storage. The settings page shows the last backup, tests the connection and starts a backup on demand.
+
+To restore a repository from a bundle:
+
+```sh
+git clone --mirror name-1794336958.bundle name.git
+```
 
 ## Hosts and tokens
 
@@ -107,7 +176,7 @@ The server accepts only fetches; a push is refused. The file view has ZIP and ta
 
 ## Development
 
-Requirements: Rust 1.85 or later, Git, and [lizard](https://github.com/terryyin/lizard) for the complexity check.
+Requirements: Rust 1.89 or later, Git, and [lizard](https://github.com/terryyin/lizard) for the complexity check.
 
 ```sh
 make run     # cargo run; reads the environment, see .env.example
