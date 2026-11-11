@@ -63,6 +63,32 @@ impl Drop for KeyFile {
     }
 }
 
+/// Removes the key files and key folders that a killed process left in
+/// `tmp`: [`KeyFile`] removes its file on drop, which a kill skips. Call it
+/// at startup, before anything writes a key. Gives the number removed.
+pub fn remove_leftovers(tmp: &Path) -> std::io::Result<usize> {
+    let entries = match std::fs::read_dir(tmp) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(err),
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("ssh-keygen-") {
+            std::fs::remove_dir_all(entry.path())?;
+        } else if name.starts_with("ssh-key-") {
+            std::fs::remove_file(entry.path())?;
+        } else {
+            continue;
+        }
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 fn random_name() -> Result<String, SshError> {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).map_err(|err| SshError::Keygen(err.to_string()))?;
@@ -240,6 +266,25 @@ mod tests {
             file.path().to_owned()
         };
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn keys_a_killed_process_left_are_removed_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(remove_leftovers(&dir.path().join("missing")).unwrap(), 0);
+        // A drop that never ran, as after a kill.
+        std::mem::forget(KeyFile::write(dir.path(), "secret").unwrap());
+        let folder = dir.path().join("ssh-keygen-00");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("key"), "secret").unwrap();
+        std::fs::write(dir.path().join("bundle-1.bundle"), "keep").unwrap();
+
+        assert_eq!(remove_leftovers(dir.path()).unwrap(), 2);
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["bundle-1.bundle"]);
     }
 
     #[test]

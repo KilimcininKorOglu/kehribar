@@ -47,6 +47,11 @@ async fn build_state(config: Config) -> Result<AppState, Box<dyn Error>> {
             "syncs interrupted by the last shutdown will run again"
         );
     }
+    // A private key that a killed process left must not stay on the disk.
+    let keys = git_archive::git::ssh::remove_leftovers(&config.tmp_dir())?;
+    if keys > 0 {
+        tracing::info!(keys, "removed SSH key files of an earlier run");
+    }
     Ok(AppState::new(pool, config, Catalog::load()?))
 }
 
