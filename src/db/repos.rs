@@ -205,6 +205,23 @@ pub async fn finish(pool: &SqlitePool, id: i64, outcome: &SyncOutcome<'_>) -> sq
     Ok(())
 }
 
+/// Ends a sync that a rate limit stopped: the repository gets back the
+/// status it had before and the time of its next try.
+pub async fn defer(
+    pool: &SqlitePool,
+    id: i64,
+    status: RepoStatus,
+    next_sync_at: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE repos SET status = ?, next_sync_at = ? WHERE id = ?")
+        .bind(status)
+        .bind(next_sync_at)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Records an integrity check; `error` is `None` when it passed.
 pub async fn record_fsck(
     pool: &SqlitePool,

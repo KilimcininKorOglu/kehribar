@@ -32,6 +32,16 @@ pub struct Host {
     /// Syncs that may run at once against this host; `None` leaves only the
     /// global concurrency setting.
     pub max_concurrency: Option<i64>,
+    /// No API request goes to the host before this time, because it
+    /// answered with a rate limit.
+    pub api_blocked_until: Option<i64>,
+}
+
+impl Host {
+    /// Whether the API of the host is still waiting out a rate limit.
+    pub fn api_blocked(&self, now: i64) -> bool {
+        self.api_blocked_until.is_some_and(|until| until > now)
+    }
 }
 
 /// Values written when a host is created or edited.
@@ -49,7 +59,7 @@ macro_rules! select_hosts {
     ($tail:literal) => {
         concat!(
             "SELECT id, host, provider, api_base_url, username, token_enc, created_at, updated_at, \
-             ref_exclude, max_concurrency FROM hosts ",
+             ref_exclude, max_concurrency, api_blocked_until FROM hosts ",
             $tail
         )
     };
@@ -120,6 +130,16 @@ pub async fn set_max_concurrency(
         .execute(pool)
         .await?;
     Ok(result.rows_affected() == 1)
+}
+
+/// Stops API requests to the host until `until`.
+pub async fn block_api(pool: &SqlitePool, id: i64, until: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE hosts SET api_blocked_until = ? WHERE id = ?")
+        .bind(until)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn clear_token(pool: &SqlitePool, id: i64) -> sqlx::Result<bool> {

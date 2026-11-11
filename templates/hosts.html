@@ -31,7 +31,7 @@
       {% for host in hosts %}
       <tr>
         <td><a class="repo-name" href="/hosts/{{ host.id }}"><strong>{{ host.host }}</strong></a></td>
-        <td>{{ layout.provider_label(host.provider) }}</td>
+        <td>{{ layout.provider_label(host.provider) }}{% if let Some(until) = host.api_blocked_until %}{% if host.api_blocked(*layout.now) %}<br><small class="muted">{{ layout.tf("hosts.api_blocked", [("time", layout.absolute(until).as_str())]) }}</small>{% endif %}{% endif %}</td>
         <td class="mono small">{% if let Some(name) = host.username %}{{ name }}{% else %}–{% endif %}</td>
         <td>{% if host.token_enc.is_some() %}<span class="badge badge-ok">{{ layout.t("cred.token_stored") }}</span>{% else %}<span class="badge">{{ layout.t("cred.token_none") }}</span>{% endif %}</td>
         <td class="mono small">{% if let Some(url) = host.api_base_url %}{{ url }}{% else %}–{% endif %}</td>

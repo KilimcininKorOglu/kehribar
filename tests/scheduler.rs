@@ -10,6 +10,7 @@ use std::sync::Arc;
 use git_archive::crypto::Cipher;
 use git_archive::db::hosts::{self, HostInput, Provider};
 use git_archive::db::repos::{self, NewRepo, RepoStatus};
+use git_archive::db::sync_runs::RunOutcome;
 use git_archive::db::{self, sync_runs, unix_now};
 use git_archive::settings::{self, Overrides};
 use git_archive::sync::SyncContext;
@@ -88,7 +89,7 @@ async fn due_repository_is_synced_and_planned_with_its_own_interval() {
 
     let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 10).await.unwrap();
     assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].outcome, Some(RepoStatus::Ok));
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Ok));
     assert_eq!(runs[0].refs_changed, 1);
 
     // Not due again until its interval passes.
@@ -193,6 +194,51 @@ async fn a_host_limit_holds_its_repositories_but_not_the_others() {
 }
 
 #[tokio::test]
+async fn a_rate_limited_fetch_is_postponed_and_keeps_the_state() {
+    let s = setup().await;
+    // Every request answers 429, like a server whose rate limit is reached.
+    let app = axum::Router::new().fallback(|| async { axum::http::StatusCode::TOO_MANY_REQUESTS });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let url = format!("http://{addr}/team/project.git");
+    let repo = NewRepo {
+        url: &url,
+        host: "local",
+        owner: "team",
+        name: "project",
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled: true,
+    };
+    let id = repos::insert(&s.ctx.pool, &repo, unix_now())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let before = unix_now();
+    assert_eq!(run_tick(&s.scheduler).await, 1);
+
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Pending);
+    assert_eq!(repo.last_error, None);
+    let wait = git_archive::providers::RATE_LIMIT_WAIT_SECONDS;
+    assert!(
+        repo.next_sync_at >= before + wait && repo.next_sync_at <= unix_now() + wait,
+        "{}",
+        repo.next_sync_at
+    );
+    let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 10).await.unwrap();
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Deferred));
+    let message = runs[0].message.clone().unwrap();
+    assert!(message.contains("429"), "{message}");
+    // Not due before the wait ends.
+    assert_eq!(run_tick(&s.scheduler).await, 0);
+}
+
+#[tokio::test]
 async fn claimed_repository_is_not_started_twice() {
     let s = setup().await;
     let source = common::source_repo(s.dir.path(), "project");
@@ -227,7 +273,7 @@ async fn missing_source_marks_the_repository_unreachable() {
             .contains("does not appear to be a git repository")
     );
     let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 10).await.unwrap();
-    assert_eq!(runs[0].outcome, Some(RepoStatus::Unreachable));
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Unreachable));
 }
 
 /// Makes the repository due now and runs one tick.
@@ -302,7 +348,7 @@ async fn damaged_archive_fails_the_integrity_check_until_repaired() {
     assert!(message.starts_with("integrity check failed: "), "{message}");
     assert!(failed.fsck_error.is_some());
     let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 1).await.unwrap();
-    assert_eq!(runs[0].outcome, Some(RepoStatus::Error));
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Error));
     // A damaged archive is not repacked.
     assert_eq!(failed.last_repack_at, repo.last_repack_at);
 

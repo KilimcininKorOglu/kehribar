@@ -46,6 +46,8 @@ pub enum GitErrorKind {
     AuthFailed,
     /// DNS, connection or TLS failure.
     Network,
+    /// The server refused the request for now because of its rate limit.
+    RateLimited,
     Timeout,
     /// `git` could not be started.
     Spawn,
@@ -256,10 +258,13 @@ fn failure(
     }
 }
 
-/// Error messages per kind, checked in order. Authentication and missing
+/// Error messages per kind, checked in order. A rate limit comes first,
+/// because servers send it with a 403 too; authentication and missing
 /// repositories come before network errors, because git prefixes an HTTP
 /// 401 or 404 with "unable to access" too.
 const PATTERNS: &[(&str, GitErrorKind)] = &[
+    ("returned error: 429", GitErrorKind::RateLimited),
+    ("rate limit", GitErrorKind::RateLimited),
     ("authentication failed", GitErrorKind::AuthFailed),
     ("returned error: 401", GitErrorKind::AuthFailed),
     ("returned error: 403", GitErrorKind::AuthFailed),
@@ -375,6 +380,16 @@ mod tests {
                 GitErrorKind::NotFound,
             ),
             ("fatal: bad object", false, GitErrorKind::Other),
+            (
+                "fatal: unable to access 'https://x/': The requested URL returned error: 429",
+                false,
+                GitErrorKind::RateLimited,
+            ),
+            (
+                "remote: API rate limit exceeded\nfatal: unable to access 'https://x/': The requested URL returned error: 403",
+                true,
+                GitErrorKind::RateLimited,
+            ),
         ];
         for (stderr, creds, expected) in cases {
             assert_eq!(classify(stderr, creds), expected, "{stderr}");

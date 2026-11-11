@@ -350,6 +350,49 @@ async fn repositories_on_another_host_are_reported_not_added() {
 }
 
 #[tokio::test]
+async fn a_rate_limit_postpones_the_scan_without_an_error() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source(&t, host_id, false).await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "120"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let before = unix_now();
+    let scanned = scan(&t, source.id).await;
+    // The source keeps its state: no error, still never scanned.
+    assert_eq!(scanned.last_error, None);
+    assert_eq!(scanned.last_scan_at, None);
+    let host = hosts::get(&t.state.pool, host_id).await.unwrap().unwrap();
+    let until = host.api_blocked_until.unwrap();
+    assert!(
+        until >= before + 120 && until <= unix_now() + 120,
+        "{until}"
+    );
+    let page = body_text(t.get("/hosts").await).await;
+    assert!(page.contains("API rate limit&#39;e takıldı"), "{page}");
+
+    // While the host waits, a scan sends no request.
+    let again = scan(&t, source.id).await;
+    assert_eq!(again.last_scan_at, None);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+
+    // After the wait the scan runs and records its result.
+    hosts::block_api(&t.state.pool, host_id, 0).await.unwrap();
+    list_answers(
+        &server,
+        json!([repo("https://github.com/octo/app.git", false)]),
+    )
+    .await;
+    let done = scan(&t, source.id).await;
+    assert!(done.last_scan_at.is_some());
+    assert_eq!(archived_urls(&t).await, ["https://github.com/octo/app.git"]);
+}
+
+#[tokio::test]
 async fn a_provider_error_is_stored_on_the_source() {
     let t = TestApp::new().await;
     let server = MockServer::start().await;

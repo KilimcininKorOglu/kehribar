@@ -4,13 +4,38 @@ use sqlx::{FromRow, SqlitePool};
 
 use super::repos::RepoStatus;
 
+text_enum! {
+    /// How a finished sync ended.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+    #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+    pub enum RunOutcome {
+        Ok => "ok",
+        Error => "error",
+        Unreachable => "unreachable",
+        /// A rate limit postponed the sync; the repository kept its state.
+        Deferred => "deferred",
+    }
+}
+
+impl From<RepoStatus> for RunOutcome {
+    /// The outcome of a sync that ended with `status`. A finished sync is
+    /// never pending or syncing; those count as errors.
+    fn from(status: RepoStatus) -> Self {
+        match status {
+            RepoStatus::Ok => Self::Ok,
+            RepoStatus::Unreachable => Self::Unreachable,
+            RepoStatus::Error | RepoStatus::Pending | RepoStatus::Syncing => Self::Error,
+        }
+    }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct SyncRun {
     pub id: i64,
     pub repo_id: i64,
     pub started_at: i64,
     pub finished_at: Option<i64>,
-    pub outcome: Option<RepoStatus>,
+    pub outcome: Option<RunOutcome>,
     pub refs_changed: i64,
     pub refs_rescued: i64,
     pub message: Option<String>,
@@ -19,8 +44,7 @@ pub struct SyncRun {
 #[derive(Debug, Clone)]
 pub struct RunResult<'a> {
     pub finished_at: i64,
-    /// One of `Ok`, `Error` or `Unreachable`.
-    pub outcome: RepoStatus,
+    pub outcome: RunOutcome,
     pub refs_changed: i64,
     pub refs_rescued: i64,
     pub message: Option<&'a str>,
@@ -104,7 +128,7 @@ mod tests {
     fn ok_result(at: i64) -> RunResult<'static> {
         RunResult {
             finished_at: at,
-            outcome: RepoStatus::Ok,
+            outcome: RunOutcome::Ok,
             refs_changed: 3,
             refs_rescued: 1,
             message: None,
@@ -122,7 +146,11 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].id, second);
         assert!(runs[0].outcome.is_none());
-        assert_eq!(runs[1].outcome, Some(RepoStatus::Ok));
+        assert_eq!(runs[1].outcome, Some(RunOutcome::Ok));
+        assert_eq!(
+            RunOutcome::from(RepoStatus::Unreachable),
+            RunOutcome::Unreachable
+        );
         assert_eq!(runs[1].refs_rescued, 1);
     }
 

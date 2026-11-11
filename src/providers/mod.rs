@@ -13,19 +13,23 @@ mod sourcehut;
 
 use std::time::Duration;
 
-use reqwest::{Client, RequestBuilder, Response};
+use reqwest::header::HeaderMap;
+use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
 use crate::db::hosts::{Host, Provider};
 use crate::db::sources::SourceKind;
+use crate::db::unix_now;
 use crate::git::Credentials;
 use crate::repo_url::{self, GIST_HOST};
 
 /// A list longer than this many pages counts as broken, not as an archive.
 pub const MAX_PAGES: usize = 500;
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// The wait after a rate limit answer that names no time.
+pub const RATE_LIMIT_WAIT_SECONDS: i64 = 15 * 60;
 
 /// One repository a provider lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +62,9 @@ pub enum ProviderError {
     ForeignPage(String),
     #[error("the API answered with an error: {0}")]
     Answer(String),
+    /// The API refused the request because of its rate limit.
+    #[error("the API rate limit is reached until Unix time {until}")]
+    RateLimited { until: i64 },
 }
 
 impl ProviderError {
@@ -310,6 +317,9 @@ fn auth(provider: Provider, credentials: Option<&Credentials>) -> Auth {
 /// The response when its status is a success, else an error naming `url`.
 fn checked(response: Response, url: Url) -> Result<Response, ProviderError> {
     let status = response.status();
+    if let Some(until) = rate_limit_until(status, response.headers(), unix_now()) {
+        return Err(ProviderError::RateLimited { until });
+    }
     if !status.is_success() {
         return Err(ProviderError::Status {
             status: status.as_u16(),
@@ -317,6 +327,30 @@ fn checked(response: Response, url: Url) -> Result<Response, ProviderError> {
         });
     }
     Ok(response)
+}
+
+/// The time from which a rate-limited API takes requests again, or `None`
+/// when the answer is no rate limit. A 429 is one; a 403 is one when the
+/// remaining quota is zero or the server asks to retry later (GitHub's
+/// secondary limit). `Retry-After` gives seconds; `X-RateLimit-Reset`
+/// (GitHub, Gitea) and `RateLimit-Reset` (GitLab) give a Unix time.
+fn rate_limit_until(status: StatusCode, headers: &HeaderMap, now: i64) -> Option<i64> {
+    let number =
+        |name: &str| -> Option<i64> { headers.get(name)?.to_str().ok()?.trim().parse().ok() };
+    let exhausted = number("x-ratelimit-remaining") == Some(0)
+        || number("ratelimit-remaining") == Some(0)
+        || number("retry-after").is_some();
+    let limited =
+        status == StatusCode::TOO_MANY_REQUESTS || (status == StatusCode::FORBIDDEN && exhausted);
+    if !limited {
+        return None;
+    }
+    let until = number("retry-after")
+        .map(|seconds| now + seconds)
+        .or_else(|| number("x-ratelimit-reset"))
+        .or_else(|| number("ratelimit-reset"))
+        .unwrap_or(now + RATE_LIMIT_WAIT_SECONDS);
+    Some(until.max(now + 1))
 }
 
 /// The URL without its query, for error messages.
@@ -381,6 +415,43 @@ mod tests {
                 "{host}"
             );
         }
+    }
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, value.parse().unwrap());
+        }
+        map
+    }
+
+    #[test]
+    fn rate_limit_answers_name_the_time_of_the_next_request() {
+        let now = 1_000;
+        let until = |status: u16, pairs: &[(&'static str, &str)]| {
+            rate_limit_until(StatusCode::from_u16(status).unwrap(), &headers(pairs), now)
+        };
+        // A 429 waits for Retry-After, else the reset time, else the default.
+        assert_eq!(until(429, &[("retry-after", "120")]), Some(1_120));
+        assert_eq!(until(429, &[("ratelimit-reset", "5000")]), Some(5_000));
+        assert_eq!(until(429, &[]), Some(now + RATE_LIMIT_WAIT_SECONDS));
+        // GitHub: a 403 with no quota left, waiting for the reset time.
+        assert_eq!(
+            until(
+                403,
+                &[
+                    ("x-ratelimit-remaining", "0"),
+                    ("x-ratelimit-reset", "4000")
+                ]
+            ),
+            Some(4_000)
+        );
+        // A reset in the past still waits a moment.
+        assert_eq!(until(429, &[("x-ratelimit-reset", "10")]), Some(now + 1));
+        // A plain 403, a quota left or a success is no rate limit.
+        assert_eq!(until(403, &[]), None);
+        assert_eq!(until(403, &[("x-ratelimit-remaining", "12")]), None);
+        assert_eq!(until(200, &[("x-ratelimit-remaining", "0")]), None);
     }
 
     #[test]

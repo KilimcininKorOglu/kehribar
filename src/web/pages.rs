@@ -13,6 +13,7 @@ use super::prefs::{Prefs, Theme};
 use super::{AppState, format, highlight};
 use crate::db::hosts::Provider;
 use crate::db::repos::RepoStatus;
+use crate::db::sync_runs::RunOutcome;
 use crate::db::unix_now;
 use crate::error::AppError;
 use crate::i18n::{Lang, Tr};
@@ -94,6 +95,16 @@ impl Layout {
             RepoStatus::Error => "status.error",
             RepoStatus::Unreachable => "status.unreachable",
         })
+    }
+
+    /// The label of a finished sync in the sync history.
+    pub fn run_label(&self, outcome: &RunOutcome) -> &str {
+        match outcome {
+            RunOutcome::Ok => self.status_label(&RepoStatus::Ok),
+            RunOutcome::Error => self.status_label(&RepoStatus::Error),
+            RunOutcome::Unreachable => self.status_label(&RepoStatus::Unreachable),
+            RunOutcome::Deferred => self.t("status.deferred"),
+        }
     }
 
     pub fn provider_label(&self, provider: &Provider) -> &str {

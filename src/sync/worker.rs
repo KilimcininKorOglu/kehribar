@@ -6,12 +6,13 @@ use std::time::Duration;
 use super::{SyncContext, credentials};
 use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
-use crate::db::sync_runs::{self, RunResult};
+use crate::db::sync_runs::{self, RunOutcome, RunResult};
 use crate::db::unix_now;
 use crate::git::maintenance;
 use crate::git::mirror::{self, SyncReport};
 use crate::git::{Credentials, Git, GitError, GitErrorKind};
 use crate::notify::{self, Change, Event};
+use crate::providers::RATE_LIMIT_WAIT_SECONDS;
 use crate::ref_filter;
 use crate::repo_url;
 use crate::settings::SyncSettings;
@@ -28,6 +29,8 @@ struct Mirrored {
 struct Failure {
     status: RepoStatus,
     message: String,
+    /// A rate limit stopped the sync: it is postponed, not failed.
+    deferred: bool,
 }
 
 impl From<GitError> for Failure {
@@ -39,7 +42,18 @@ impl From<GitError> for Failure {
         };
         Self {
             status,
+            deferred: err.kind == GitErrorKind::RateLimited,
             message: err.message,
+        }
+    }
+}
+
+impl Failure {
+    fn error(message: String) -> Self {
+        Self {
+            status: RepoStatus::Error,
+            message,
+            deferred: false,
         }
     }
 }
@@ -64,7 +78,10 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         dir: &dir,
         now: started,
     };
-    let (status, message, mirrored) = sync_and_maintain(ctx, &job, settings).await?;
+    let (status, message, mirrored) = match sync_and_maintain(ctx, &job, settings).await? {
+        Ok(done) => done,
+        Err(message) => return defer(ctx, repo, run_id, &message).await,
+    };
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
     let size_bytes = archive_size(&dir).await;
@@ -83,10 +100,33 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     report_change(ctx, repo, status, message.as_deref()).await;
     let run = RunResult {
         finished_at: finished,
-        outcome: status,
+        outcome: status.into(),
         refs_changed: i64::try_from(mirrored.report.refs_changed).unwrap_or(i64::MAX),
         refs_rescued: i64::try_from(mirrored.report.refs_rescued).unwrap_or(i64::MAX),
         message: message.as_deref(),
+    };
+    sync_runs::finish(&ctx.pool, run_id, &run).await
+}
+
+/// Records a sync that a rate limit stopped: the repository keeps its state
+/// and tries again after [`RATE_LIMIT_WAIT_SECONDS`], without a notification;
+/// git does not pass on the server's own retry time.
+async fn defer(ctx: &SyncContext, repo: &Repo, run_id: i64, message: &str) -> sqlx::Result<()> {
+    let finished = unix_now();
+    tracing::info!(repo = %repo.url, %message, "sync postponed by a rate limit");
+    repos::defer(
+        &ctx.pool,
+        repo.id,
+        repo.status,
+        finished + RATE_LIMIT_WAIT_SECONDS,
+    )
+    .await?;
+    let run = RunResult {
+        finished_at: finished,
+        outcome: RunOutcome::Deferred,
+        refs_changed: 0,
+        refs_rescued: 0,
+        message: Some(message),
     };
     sync_runs::finish(&ctx.pool, run_id, &run).await
 }
@@ -108,23 +148,34 @@ async fn report_change(ctx: &SyncContext, repo: &Repo, status: RepoStatus, messa
     notify::send(ctx, event).await;
 }
 
+/// The status, the message and the Git work of a sync that ran to its end.
+type Synced = (RepoStatus, Option<String>, Mirrored);
+
 /// Fetches the repository, then runs the maintenance that is due. A failed
-/// integrity check fails the sync, but keeps the fetch report.
+/// integrity check fails the sync, but keeps the fetch report. The inner
+/// `Err` is the message of a sync that a rate limit stopped.
 async fn sync_and_maintain(
     ctx: &SyncContext,
     job: &Job<'_>,
     settings: SyncSettings,
-) -> sqlx::Result<(RepoStatus, Option<String>, Mirrored)> {
+) -> sqlx::Result<Result<Synced, String>> {
     let mirrored = match mirror_repo(ctx, job).await {
         Ok(mirrored) => mirrored,
-        Err(failure) => return Ok((failure.status, Some(failure.message), Mirrored::default())),
+        Err(failure) if failure.deferred => return Ok(Err(failure.message)),
+        Err(failure) => {
+            return Ok(Ok((
+                failure.status,
+                Some(failure.message),
+                Mirrored::default(),
+            )));
+        }
     };
     let upkeep = maintain(job, settings).await;
     upkeep.record(&ctx.pool, job.repo.id, job.now).await?;
-    Ok(match upkeep.failure() {
+    Ok(Ok(match upkeep.failure() {
         Some(message) => (RepoStatus::Error, Some(message), mirrored),
         None => (RepoStatus::Ok, None, mirrored),
-    })
+    }))
 }
 
 /// What the maintenance of one sync did; `None` means a task was not due.
@@ -220,10 +271,7 @@ impl Job<'_> {
 
 async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failure> {
     let credentials = credentials::resolve(&ctx.cipher, job.repo, job.host)
-        .map_err(|message| Failure {
-            status: RepoStatus::Error,
-            message,
-        })?
+        .map_err(Failure::error)?
         .map(|c| credentials::for_git(c, job.is_bitbucket()));
     let credentials = credentials.as_ref();
     let exclude = ref_filter::combine(
@@ -252,10 +300,12 @@ async fn mirror_wiki(job: &Job<'_>, credentials: Option<&Credentials>) -> Result
     let wiki_dir = mirror::wiki_dir(job.dir);
     let wiki = mirror::sync_wiki(job.git, &url, &wiki_dir, credentials, job.now)
         .await
-        .map_err(|err| Failure {
+        .map_err(|err| {
+            if err.kind == GitErrorKind::RateLimited {
+                return Failure::from(err);
+            }
             // The repository itself is fine; only the wiki failed.
-            status: RepoStatus::Error,
-            message: format!("wiki: {}", err.message),
+            Failure::error(format!("wiki: {}", err.message))
         })?;
     Ok(wiki.is_some())
 }

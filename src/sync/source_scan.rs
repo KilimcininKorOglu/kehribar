@@ -9,7 +9,7 @@ use crate::db::repos::{self, NewRepo};
 use crate::db::sources::{self, Source};
 use crate::db::unix_now;
 use crate::notify::{self, Change, Event};
-use crate::providers::{self, RemoteRepo};
+use crate::providers::{self, ProviderError, RemoteRepo};
 use crate::repo_url;
 
 /// What one scan did.
@@ -22,16 +22,25 @@ pub struct ScanReport {
     pub filtered: usize,
     /// The error stored on the source, `None` after a clean scan.
     pub error: Option<String>,
+    /// Set when the host's API rate limit postponed the scan to this time;
+    /// such a scan leaves the source as it was.
+    pub deferred_until: Option<i64>,
 }
 
 /// Scans `source` and records the outcome on it. `Err` is a database error;
-/// a provider error is part of the report.
+/// a provider error is part of the report. A host that waits out a rate
+/// limit gets no request; the source is scanned again after the wait.
 pub async fn scan(ctx: &SyncContext, source: &Source) -> sqlx::Result<ScanReport> {
     let started = unix_now();
     let report = match hosts::get(&ctx.pool, source.host_id).await? {
+        Some(host) if host.api_blocked(started) => deferred(host.api_blocked_until),
         Some(host) => scan_host(ctx, source, &host).await?,
         None => failed(format!("host {} does not exist", source.host_id)),
     };
+    if let Some(until) = report.deferred_until {
+        tracing::info!(source = %source.name, until, "source scan postponed by a rate limit");
+        return Ok(report);
+    }
     sources::mark_scanned(&ctx.pool, source.id, started, report.error.as_deref()).await?;
     match &report.error {
         Some(err) => tracing::warn!(source = %source.name, %err, "source scan failed"),
@@ -69,6 +78,13 @@ fn failed(error: String) -> ScanReport {
     }
 }
 
+fn deferred(until: Option<i64>) -> ScanReport {
+    ScanReport {
+        deferred_until: until,
+        ..ScanReport::default()
+    }
+}
+
 async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Result<ScanReport> {
     let credentials = match credentials::for_host(&ctx.cipher, host) {
         Ok(credentials) => credentials,
@@ -77,6 +93,10 @@ async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Res
     let listed =
         match providers::list_repos(host, credentials.as_ref(), source.kind, &source.name).await {
             Ok(listed) => listed,
+            Err(ProviderError::RateLimited { until }) => {
+                hosts::block_api(&ctx.pool, host.id, until).await?;
+                return Ok(deferred(Some(until)));
+            }
             Err(err) => return Ok(failed(err.to_string())),
         };
     let mut report = ScanReport {
