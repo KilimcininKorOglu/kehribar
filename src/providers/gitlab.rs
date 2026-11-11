@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::de::IgnoredAny;
 
 use super::{Api, ProviderError, RemoteRepo};
+use crate::db::hosts::Provider;
 use crate::db::sources::SourceKind;
 
 const PER_PAGE: usize = 100;
@@ -27,6 +28,7 @@ pub async fn list(
         SourceKind::Org => api.url(&["groups", name, "projects"])?,
         SourceKind::User => api.url(&["users", name, "projects"])?,
         SourceKind::Starred => api.url(&["users", name, "starred_projects"])?,
+        SourceKind::Gists => return Err(ProviderError::kind(Provider::Gitlab, kind)),
     };
     if kind == SourceKind::Org {
         url.query_pairs_mut()

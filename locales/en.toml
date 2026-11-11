@@ -80,6 +80,7 @@ scheme = "Only http and https URLs are supported."
 credentials = "Put the username and token in the token fields, not in the URL."
 query = "The URL must not end with a ? or # part."
 path = "The URL path must be owner/name with only letters, digits, '.', '-', '_' or '~'."
+gist_owner = "Enter the gist with its owner: https://gist.github.com/<user>/<id>"
 
 [repo_new]
 title = "Add repository"
@@ -163,7 +164,8 @@ name_help = "As it appears in the URL, for example octo-org. A GitLab group can 
 kind_user = "User"
 kind_org = "Organization"
 kind_starred = "Starred by user"
-kind_unsupported = "This host type cannot list the selected source type. Starred repositories exist only on GitHub, GitLab and Forgejo / Gitea hosts."
+kind_gists = "Gists of user"
+kind_unsupported = "This host type cannot list the selected source type. Starred repositories exist only on GitHub, GitLab and Forgejo / Gitea hosts, gists only on the github.com host."
 auto_add = "Add new repositories"
 auto_add_help = "Scan this source on the global interval and add new repositories automatically"
 include_forks = "Forks"

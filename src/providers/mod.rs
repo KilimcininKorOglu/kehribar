@@ -17,6 +17,7 @@ use url::Url;
 use crate::db::hosts::{Host, Provider};
 use crate::db::sources::SourceKind;
 use crate::git::Credentials;
+use crate::repo_url::{self, GIST_HOST};
 
 /// A list longer than this many pages counts as broken, not as an archive.
 pub const MAX_PAGES: usize = 500;
@@ -51,6 +52,15 @@ pub enum ProviderError {
     TooManyPages,
     #[error("the API sent a next page on another server: {0}")]
     ForeignPage(String),
+}
+
+impl ProviderError {
+    fn kind(provider: Provider, kind: SourceKind) -> Self {
+        Self::KindUnsupported {
+            provider: provider.code(),
+            kind: kind.code(),
+        }
+    }
 }
 
 impl From<reqwest::Error> for ProviderError {
@@ -175,14 +185,18 @@ pub fn can_list(provider: Provider) -> bool {
     provider != Provider::Generic
 }
 
-/// Whether the provider can list sources of `kind`.
-pub fn supports(provider: Provider, kind: SourceKind) -> bool {
+/// Whether the provider of `host` can list sources of `kind`. Gists exist
+/// only on github.com.
+pub fn supports(host: &Host, kind: SourceKind) -> bool {
     match kind {
-        SourceKind::User | SourceKind::Org => can_list(provider),
+        SourceKind::User | SourceKind::Org => can_list(host.provider),
         SourceKind::Starred => matches!(
-            provider,
+            host.provider,
             Provider::Github | Provider::Gitlab | Provider::Forgejo
         ),
+        SourceKind::Gists => {
+            host.provider == Provider::Github && host.host == repo_url::settings_host(GIST_HOST)
+        }
     }
 }
 
@@ -194,11 +208,8 @@ pub async fn list_repos(
     name: &str,
 ) -> Result<Vec<RemoteRepo>, ProviderError> {
     // A provider without any list keeps its own error below.
-    if can_list(host.provider) && !supports(host.provider, kind) {
-        return Err(ProviderError::KindUnsupported {
-            provider: host.provider.code(),
-            kind: kind.code(),
-        });
+    if can_list(host.provider) && !supports(host, kind) {
+        return Err(ProviderError::kind(host.provider, kind));
     }
     let api = connect(host, credentials)?;
     match host.provider {

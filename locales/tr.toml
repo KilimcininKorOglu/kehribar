@@ -80,6 +80,7 @@ scheme = "Yalnız http ve https ile başlayan URL'ler kabul edilir."
 credentials = "Kullanıcı adını ve token'ı URL'ye değil, kendi alanlarına yazın."
 query = "URL'nin sonunda soru işareti (?) veya # ile başlayan bir ek olamaz."
 path = "URL yolu kullanıcı/repo biçiminde olmalı. Yolda yalnız harf, rakam, '.', '-', '_' ve '~' bulunabilir."
+gist_owner = "Gist'i sahibinin adıyla birlikte girin: https://gist.github.com/<kullanıcı>/<id>"
 
 [repo_new]
 title = "Repo ekle"
@@ -163,7 +164,8 @@ name_help = "URL'de nasıl yazıyorsa öyle girin, örneğin octo-org. GitLab'de
 kind_user = "Kullanıcı"
 kind_org = "Organizasyon"
 kind_starred = "Yıldızladıkları"
-kind_unsupported = "Bu sunucu türü seçtiğiniz kaynak türünü listeleyemiyor. Yıldızlananlar yalnız GitHub, GitLab ve Forgejo / Gitea sunucularında var."
+kind_gists = "Gist'leri"
+kind_unsupported = "Bu sunucu türü seçtiğiniz kaynak türünü listeleyemiyor. Yıldızlananlar yalnız GitHub, GitLab ve Forgejo / Gitea sunucularında, gist'ler yalnız github.com sunucusunda var."
 auto_add = "Yeni repoları ekle"
 auto_add_help = "Bu kaynağı düzenli olarak tara ve yeni açılan repoları arşive ekle"
 include_forks = "Fork'lar"

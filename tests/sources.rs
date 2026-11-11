@@ -251,6 +251,36 @@ async fn the_sources_page_saves_filters_and_rejects_bad_patterns() {
 }
 
 #[tokio::test]
+async fn a_gist_source_adds_gists_without_a_wiki() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    Mock::given(method("GET"))
+        .and(path("/users/alice/gists"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!([{ "id": "aa5a315d61ae9438b18d", "owner": { "login": "alice" } }]),
+        ))
+        .mount(&server)
+        .await;
+    let form = format!("host_id={host_id}&kind=gists&name=alice&auto_add=1");
+    assert_eq!(
+        t.post("/sources", &form).await.status(),
+        StatusCode::SEE_OTHER
+    );
+    let source = wait_for_scan(&t).await;
+    assert_eq!(source.last_error, None);
+    let gist = &repos::list(&t.state.pool, None).await.unwrap()[0];
+    assert_eq!(gist.url, "https://gist.github.com/aa5a315d61ae9438b18d.git");
+    assert_eq!(
+        (gist.host.as_str(), gist.owner.as_str(), gist.name.as_str()),
+        ("gist.github.com", "alice", "aa5a315d61ae9438b18d")
+    );
+    assert!(!gist.wiki_enabled);
+    let page = body_text(t.get("/sources").await).await;
+    assert!(page.contains("Gist&#39;leri"), "{page}");
+}
+
+#[tokio::test]
 async fn repositories_on_another_host_are_reported_not_added() {
     let t = TestApp::new().await;
     let server = MockServer::start().await;

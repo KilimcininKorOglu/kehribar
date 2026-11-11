@@ -127,7 +127,12 @@ async fn add(
     remote: &RemoteRepo,
 ) -> sqlx::Result<Added> {
     let location = match repo_url::parse(&remote.clone_url) {
-        Ok(location) if location.host.eq_ignore_ascii_case(&host.host) => location,
+        // Gists of a github.com source live on gist.github.com.
+        Ok(location)
+            if repo_url::settings_host(&location.host).eq_ignore_ascii_case(&host.host) =>
+        {
+            location
+        }
         _ => return Ok(Added::Foreign),
     };
     if !accepts(source, remote, &location.name) {
@@ -142,7 +147,8 @@ async fn add(
         username: None,
         token_enc: None,
         interval_minutes: None,
-        wiki_enabled: true,
+        // A gist has no wiki.
+        wiki_enabled: location.host != repo_url::GIST_HOST,
     };
     Ok(match repos::insert(&ctx.pool, &repo, unix_now()).await? {
         Some(_) => Added::Yes,

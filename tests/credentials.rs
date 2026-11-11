@@ -284,6 +284,46 @@ async fn wrong_repository_token_is_not_rescued_by_the_host_token() {
 }
 
 #[tokio::test]
+async fn gists_use_the_token_of_the_github_host() {
+    let s = setup().await;
+    let token_enc = s.ctx.cipher.encrypt(HOST_TOKEN).unwrap();
+    let github = HostInput {
+        host: "github.com",
+        provider: Provider::Github,
+        api_base_url: None,
+        username: Some(HOST_USER),
+        token_enc: Some(&token_enc),
+    };
+    hosts::insert(&s.ctx.pool, &github, unix_now())
+        .await
+        .unwrap();
+    // A gist stored under gist.github.com, served by the local server.
+    let gist = NewRepo {
+        url: &s.url,
+        host: "gist.github.com",
+        owner: "team",
+        name: "project",
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled: false,
+    };
+    let id = repos::insert(&s.ctx.pool, &gist, unix_now())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let repo = s.sync(id).await;
+    assert_eq!(repo.status, RepoStatus::Ok, "{:?}", repo.last_error);
+    assert!(
+        s.ctx
+            .repo_dir(&repo)
+            .ends_with("repos/gist.github.com/team/project.git")
+    );
+}
+
+#[tokio::test]
 async fn without_any_token_a_protected_repository_is_unreachable() {
     let s = setup().await;
     let id = s.add_repo(None).await;

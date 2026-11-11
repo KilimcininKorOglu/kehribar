@@ -107,6 +107,7 @@ impl ListPage {
             SourceKind::User => "sources.kind_user",
             SourceKind::Org => "sources.kind_org",
             SourceKind::Starred => "sources.kind_starred",
+            SourceKind::Gists => "sources.kind_gists",
         })
     }
 
@@ -200,7 +201,7 @@ async fn validate(
     let Some(kind) = SourceKind::parse(&form.kind) else {
         return Ok(Err("sources.invalid_kind"));
     };
-    if !providers::supports(host.provider, kind) {
+    if !providers::supports(&host, kind) {
         return Ok(Err("sources.kind_unsupported"));
     }
     // Only GitLab groups nest.

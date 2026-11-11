@@ -12,6 +12,8 @@ text_enum! {
         Org => "org",
         /// The repositories a user starred.
         Starred => "starred",
+        /// The gists of a GitHub user.
+        Gists => "gists",
     }
 }
 

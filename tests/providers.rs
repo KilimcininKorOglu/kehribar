@@ -181,6 +181,52 @@ async fn starred_lists_page_on_every_provider_that_has_them() {
 }
 
 #[tokio::test]
+async fn github_gists_name_their_owner_and_need_github_com() {
+    let server = MockServer::start().await;
+    let gist = |n: usize| {
+        if n == 2 {
+            // An anonymous gist has no owner and no archive path.
+            json!({ "id": "anon", "owner": null })
+        } else {
+            json!({ "id": format!("g{n}"), "owner": { "login": "alice" } })
+        }
+    };
+    mount_page(&server, "/users/alice/gists", "1", items(0, 3, gist)).await;
+    let mut github = host(Provider::Github, server.uri());
+    github.host = "github.com".into();
+    let repos = list_repos(&github, None, SourceKind::Gists, "alice")
+        .await
+        .unwrap();
+    assert_eq!(
+        urls(&repos),
+        [
+            "https://gist.github.com/alice/g0",
+            "https://gist.github.com/alice/g1"
+        ]
+    );
+
+    // The token owner's list has the secret gists too.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": "alice" })))
+        .mount(&server)
+        .await;
+    mount_page(&server, "/gists", "1", items(0, 1, gist)).await;
+    let token = creds("git", "secret");
+    let own = list_repos(&github, Some(&token), SourceKind::Gists, "alice")
+        .await
+        .unwrap();
+    assert_eq!(urls(&own), ["https://gist.github.com/alice/g0"]);
+
+    // GitHub Enterprise has no gist list here.
+    let enterprise = host(Provider::Github, server.uri());
+    let err = list_repos(&enterprise, None, SourceKind::Gists, "alice")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "the github provider has no gists list");
+}
+
+#[tokio::test]
 async fn github_lists_the_token_owners_private_stars() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

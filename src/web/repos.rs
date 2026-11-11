@@ -262,7 +262,7 @@ async fn detail_page(
 ) -> Result<DetailPage, AppError> {
     let runs = sync_runs::list_for_repo(&ctx.state.pool, repo.id, HISTORY_LIMIT).await?;
     let global = crate::settings::effective(&ctx.state.pool, &ctx.state.config).await?;
-    let host = hosts::find_by_host(&ctx.state.pool, &repo.host).await?;
+    let host = hosts::find_by_host(&ctx.state.pool, repo_url::settings_host(&repo.host)).await?;
     let credential_source = credentials::source(&repo, host.as_ref());
     let clone_url = clone_url(ctx, &repo);
     let layout = ctx.layout(Nav::Repos);

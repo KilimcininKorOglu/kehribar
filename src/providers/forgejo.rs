@@ -4,6 +4,7 @@
 use serde::Deserialize;
 
 use super::{Api, ProviderError, RemoteRepo};
+use crate::db::hosts::Provider;
 use crate::db::sources::SourceKind;
 
 /// The default maximum page size of Gitea and Forgejo.
@@ -26,6 +27,7 @@ pub async fn list(
         SourceKind::Org => api.url(&["orgs", name, "repos"])?,
         SourceKind::User => api.url(&["users", name, "repos"])?,
         SourceKind::Starred => api.url(&["users", name, "starred"])?,
+        SourceKind::Gists => return Err(ProviderError::kind(Provider::Forgejo, kind)),
     };
     let repos: Vec<Repo> = api.paged(url, "limit", LIMIT).await?;
     Ok(repos

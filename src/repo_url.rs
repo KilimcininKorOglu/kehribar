@@ -31,6 +31,8 @@ pub enum UrlError {
     QueryOrFragment,
     #[error("the URL path must be owner/name with letters, digits, '.', '-', '_' or '~'")]
     Path,
+    #[error("a gist URL must name its owner: https://gist.github.com/<user>/<id>")]
+    GistOwner,
 }
 
 impl UrlError {
@@ -42,7 +44,22 @@ impl UrlError {
             Self::Credentials => "url.credentials",
             Self::QueryOrFragment => "url.query",
             Self::Path => "url.path",
+            Self::GistOwner => "url.gist_owner",
         }
+    }
+}
+
+/// The host of GitHub gists. A gist is fetched from
+/// `https://gist.github.com/<id>.git` and archived as `<user>/<id>`.
+pub const GIST_HOST: &str = "gist.github.com";
+
+/// The host whose settings and token a repository on `host` uses: gists
+/// use the ones of github.com.
+pub fn settings_host(host: &str) -> &str {
+    if host == GIST_HOST {
+        "github.com"
+    } else {
+        host
     }
 }
 
@@ -51,6 +68,9 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
     check_parts(&url)?;
     let host = host_with_port(&url).ok_or(UrlError::Invalid)?;
     let segments = path_segments(&url)?;
+    if host == GIST_HOST {
+        return parse_gist(url.scheme(), &segments);
+    }
     let (last, owners) = segments.split_last().ok_or(UrlError::Path)?;
     let name = last.strip_suffix(".git").unwrap_or(last);
     if owners.is_empty() || !is_safe_segment(name) {
@@ -61,6 +81,28 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         host,
         owner: owners.join("/"),
         name: name.to_owned(),
+    })
+}
+
+/// `https://gist.github.com/<user>/<id>`, the address of a gist page. The
+/// bare clone URL `/<id>.git` names no owner, so it is refused.
+fn parse_gist(scheme: &str, segments: &[&str]) -> Result<RepoLocation, UrlError> {
+    let [user, id] = segments else {
+        return Err(if segments.len() == 1 {
+            UrlError::GistOwner
+        } else {
+            UrlError::Path
+        });
+    };
+    let id = id.strip_suffix(".git").unwrap_or(id);
+    if !is_safe_segment(id) {
+        return Err(UrlError::Path);
+    }
+    Ok(RepoLocation {
+        url: format!("{scheme}://{GIST_HOST}/{id}.git"),
+        host: GIST_HOST.to_owned(),
+        owner: (*user).to_owned(),
+        name: id.to_owned(),
     })
 }
 
@@ -237,6 +279,29 @@ mod tests {
     }
 
     #[test]
+    fn gist_pages_are_fetched_by_id_and_archived_under_the_owner() {
+        let expected = location(
+            "https://gist.github.com/aa5a315d61ae9438b18d.git",
+            "gist.github.com",
+            "octocat",
+            "aa5a315d61ae9438b18d",
+        );
+        for input in [
+            "https://gist.github.com/octocat/aa5a315d61ae9438b18d",
+            "https://Gist.GitHub.com/octocat/aa5a315d61ae9438b18d.git/",
+        ] {
+            assert_eq!(parse(input).unwrap(), expected, "{input}");
+        }
+        assert_eq!(
+            parse("https://gist.github.com/aa5a315d61ae9438b18d.git"),
+            Err(UrlError::GistOwner)
+        );
+        assert_eq!(parse("https://gist.github.com/a/b/c"), Err(UrlError::Path));
+        assert_eq!(settings_host("gist.github.com"), "github.com");
+        assert_eq!(settings_host("gitlab.com"), "gitlab.com");
+    }
+
+    #[test]
     fn dot_segments_are_resolved_before_validation() {
         // The URL parser removes "..", so the result stays inside the host.
         let parsed = parse("https://github.com/a/../b/c").unwrap();
@@ -316,6 +381,7 @@ mod tests {
             UrlError::Credentials,
             UrlError::QueryOrFragment,
             UrlError::Path,
+            UrlError::GistOwner,
         ] {
             assert!(err.message_key().starts_with("url."));
         }

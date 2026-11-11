@@ -60,6 +60,31 @@ async fn adding_a_repository_lists_it_and_rejects_a_duplicate() {
 }
 
 #[tokio::test]
+async fn a_gist_page_is_added_under_its_owner_and_a_bare_gist_is_rejected() {
+    let t = TestApp::new().await;
+    let bare = t
+        .post("/repos", "url=https%3A%2F%2Fgist.github.com%2Fabc123.git")
+        .await;
+    assert_eq!(bare.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(bare).await;
+    assert!(html.contains("sahibinin adıyla birlikte girin"), "{html}");
+
+    let response = t
+        .post(
+            "/repos",
+            "url=https%3A%2F%2Fgist.github.com%2Foctocat%2Fabc123",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(repo.url, "https://gist.github.com/abc123.git");
+    assert_eq!(
+        (repo.host.as_str(), repo.owner.as_str(), repo.name.as_str()),
+        ("gist.github.com", "octocat", "abc123")
+    );
+}
+
+#[tokio::test]
 async fn unchecked_wiki_and_bad_interval_are_handled() {
     let t = TestApp::new().await;
     let bad = t.post("/repos", &format!("url={URL}&interval=0")).await;

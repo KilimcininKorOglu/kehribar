@@ -13,6 +13,7 @@ use crate::git::mirror::{self, SyncReport};
 use crate::git::{Credentials, Git, GitError, GitErrorKind};
 use crate::notify::{self, Change, Event};
 use crate::ref_filter;
+use crate::repo_url;
 use crate::settings::SyncSettings;
 
 /// The result of the Git work of one sync.
@@ -55,7 +56,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         u64::try_from(settings.git_timeout_seconds).unwrap_or(u64::MAX),
     ));
     let dir = ctx.repo_dir(repo);
-    let host = hosts::find_by_host(&ctx.pool, &repo.host).await?;
+    let host = hosts::find_by_host(&ctx.pool, repo_url::settings_host(&repo.host)).await?;
     let job = Job {
         git: &git,
         repo,
