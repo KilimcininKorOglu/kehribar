@@ -229,12 +229,17 @@ async fn credentials_are_written_but_never_read_back() {
         (Some("other"), Some(true))
     );
 
+    // Rotating only the token keeps the username.
+    let (_, repo) = call(&t, &token, "PUT", &path, json!({ "token": "glpat-2" })).await;
+    assert_eq!(repo["username"], "other");
     let (_, repo) = call(&t, &token, "PUT", &path, json!({ "token": null })).await;
     assert_eq!(
-        (repo["username"].clone(), repo["has_token"].clone()),
-        (Value::Null, json!(false))
+        (repo["username"].as_str(), repo["has_token"].clone()),
+        (Some("other"), json!(false))
     );
     assert_eq!(stored(&t).await.token_enc, None);
+    let (_, repo) = call(&t, &token, "PUT", &path, json!({ "username": null })).await;
+    assert_eq!(repo["username"], Value::Null);
 }
 
 #[tokio::test]

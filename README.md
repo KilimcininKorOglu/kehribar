@@ -281,7 +281,7 @@ curl -H "Authorization: Bearer gaa_..." http://localhost:8600/api/v1/repos
 | `GET /repos/{id}/runs` | Its sync runs, newest first; `limit` is 1 to 200, default 50. |
 | `POST /repos` | Adds a repository: `url` and optional `interval_minutes`, `wiki_enabled` (default `true`), `lfs_enabled`, `ref_exclude`, `username`, `token`. Answers `201` and syncs it at once. |
 | `PATCH /repos/{id}` | Changes `interval_minutes` (`null` for the global interval), `wiki_enabled`, `lfs_enabled`, `ref_exclude`. Fields that are absent keep their value. |
-| `PUT /repos/{id}/credentials` | Sets `username` and `token`. Without a `token` field the stored token stays; `null` removes it. |
+| `PUT /repos/{id}/credentials` | Sets `username` and `token`. A field that is absent keeps its stored value; `null` removes it. |
 | `DELETE /repos/{id}` | Deletes the repository with its archive. A repository that syncs now answers `409` (`repo.delete_busy`). |
 | `POST /repos/{id}/sync` | Syncs now, or once more after the running sync, like a push webhook. Answers `202`. |
 | `GET /hosts`, `GET /hosts/{id}` | Hosts. |

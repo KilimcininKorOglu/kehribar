@@ -238,8 +238,9 @@ pub async fn update(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialsBody {
-    #[serde(default)]
-    username: Option<String>,
+    /// Absent keeps the stored username; `null` removes it.
+    #[serde(default, deserialize_with = "present")]
+    username: Option<Option<String>>,
     /// Absent keeps the stored token; `null` or blank removes it.
     #[serde(default, deserialize_with = "present")]
     token: Option<Option<String>>,
@@ -252,17 +253,11 @@ pub async fn credentials(
     Id(id): Id,
     JsonBody(body): JsonBody<CredentialsBody>,
 ) -> ApiResult<Json<RepoView>> {
-    found(repos::get(&state.pool, id).await?)?;
+    let repo = found(repos::get(&state.pool, id).await?)?;
+    let username = body.username.unwrap_or(repo.username);
     let clear = matches!(&body.token, Some(token) if optional_text(token.as_deref()).is_none());
     let token = body.token.flatten();
-    save_credentials(
-        &state,
-        id,
-        body.username.as_deref(),
-        token.as_deref(),
-        clear,
-    )
-    .await?;
+    save_credentials(&state, id, username.as_deref(), token.as_deref(), clear).await?;
     view(&state, id).await
 }
 
