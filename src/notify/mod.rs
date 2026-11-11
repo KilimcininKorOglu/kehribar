@@ -12,7 +12,7 @@ use crate::sync::SyncContext;
 use channels::{RepoInfo, WebhookBody};
 
 /// Prefix of every message, so the reader sees which system sent it.
-const SENDER: &str = "git-archive";
+const SENDER: &str = "Kehribar";
 
 #[derive(Debug, Clone, Copy)]
 pub enum Event<'a> {

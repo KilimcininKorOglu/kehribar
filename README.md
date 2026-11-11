@@ -1,11 +1,11 @@
-# git-archive
+# Kehribar
 
-git-archive keeps complete mirrors of Git repositories from GitHub, GitLab, Forgejo, Gitea, Bitbucket Cloud, Gitee, Azure DevOps, SourceHut or any Git server that speaks HTTP(S). It fetches every branch, tag and commit, and the wiki when there is one, on a schedule. A web interface shows the archived code, and the archives can be cloned or downloaded back at any time.
+Kehribar keeps complete mirrors of Git repositories from GitHub, GitLab, Forgejo, Gitea, Bitbucket Cloud, Gitee, Azure DevOps, SourceHut or any Git server that speaks HTTP(S). It fetches every branch, tag and commit, and the wiki when there is one, on a schedule. A web interface shows the archived code, and the archives can be cloned or downloaded back at any time.
 
 The archive never loses data that it fetched once:
 
 - A fetch never prunes. A branch or tag deleted at the source stays in the archive.
-- When the source rewrites a ref with a force-push, the old commit is kept under `refs/git-archive/rewritten/<unix-time>/<ref>`, for example `refs/git-archive/rewritten/1794336958/heads/main`. The web interface lists these refs as rewritten history.
+- When the source rewrites a ref with a force-push, the old commit is kept under `refs/kehribar/rewritten/<unix-time>/<ref>`, for example `refs/kehribar/rewritten/1794336958/heads/main`. The web interface lists these refs as rewritten history.
 - Garbage collection never expires unreachable objects (`gc.pruneExpire=never`).
 - A repository that the source deletes or makes unreachable is marked "source unreachable". Its archive stays as it is.
 - A repository that disappears from a watched user or organization stays in the archive.
@@ -44,17 +44,17 @@ Requirements: Docker with Docker Compose.
 
 ```sh
 cp .env.example .env
-# Set GIT_ARCHIVE_ADMIN_PASSWORD and a secret key:
-openssl rand -hex 32   # paste the output into GIT_ARCHIVE_SECRET_KEY
+# Set KEHRIBAR_ADMIN_PASSWORD and a secret key:
+openssl rand -hex 32   # paste the output into KEHRIBAR_SECRET_KEY
 docker compose up -d --build
 ```
 
 Open http://localhost:8600 and sign in with the admin username and password.
 
-The data lives in the named volume `git-archive-data`, mounted at `/data`:
+The data lives in the named volume `kehribar-data`, mounted at `/data`:
 
 ```
-/data/git-archive.db                         SQLite database
+/data/kehribar.db                         SQLite database
 /data/repos/<host>/<owner>/<name>.git        bare mirror
 /data/repos/<host>/<owner>/<name>.wiki.git   wiki mirror, when there is one
 /data/ssh/known_hosts.d/<host>               SSH host keys, one file per server
@@ -68,35 +68,35 @@ Every setting is an environment variable. Docker Compose reads them from `.env`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `GIT_ARCHIVE_ADMIN_USERNAME` | (required) | Admin username for the web interface and for `git clone`. |
-| `GIT_ARCHIVE_ADMIN_PASSWORD` | (required) | Admin password. |
-| `GIT_ARCHIVE_SECRET_KEY` | (required) | 64 hex characters. Encrypts the stored tokens. |
-| `GIT_ARCHIVE_LISTEN_ADDR` | empty | Listen address. Empty listens on `[::]:8600`, or on `0.0.0.0:8600` without IPv6. |
-| `GIT_ARCHIVE_DATA_DIR` | `/data` | Database and mirrors. |
-| `GIT_ARCHIVE_SYNC_INTERVAL_MINUTES` | `360` | Global sync interval. Also the scan interval of watched sources. |
-| `GIT_ARCHIVE_SYNC_CONCURRENCY` | `2` | Syncs that run at the same time. |
-| `GIT_ARCHIVE_GIT_TIMEOUT_SECONDS` | `3600` | Time limit of one git command. |
-| `GIT_ARCHIVE_SESSION_TTL_HOURS` | `168` | Lifetime of a web session. |
-| `GIT_ARCHIVE_COOKIE_SECURE` | `false` | Set to `true` when the site is served over HTTPS. The clone URL on the repository page then uses `https`. |
-| `GIT_ARCHIVE_LOG_LEVEL` | `info` | Log filter, for example `debug` or `git_archive=debug`. |
-| `GIT_ARCHIVE_TRUSTED_PROXIES` | empty | Addresses or ranges of the reverse proxies in front of the app, separated by commas, for example `10.0.0.0/8, 172.16.0.0/12`. For a connection from one of them, the client address comes from `X-Forwarded-For`, so 10 failed logins lock out that client only, not everyone behind the proxy. Empty ignores the header. |
-| `GIT_ARCHIVE_FSCK_INTERVAL_DAYS` | `7` | Days between two `git fsck` runs per repository. `0` turns the check off. |
-| `GIT_ARCHIVE_REPACK_INTERVAL_DAYS` | `7` | Days between two `git repack` runs per repository. `0` turns the repack off. |
-| `GIT_ARCHIVE_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page, and push webhook URLs start with it. |
-| `GIT_ARCHIVE_NOTIFY_WEBHOOK_URL` | empty | Every notification is POSTed to this URL as JSON. |
-| `GIT_ARCHIVE_NOTIFY_TELEGRAM_BOT_TOKEN` | empty | Telegram bot token from BotFather. |
-| `GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_ID` | empty | Chat that receives the Telegram notifications. |
-| `GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL` | `https://api.telegram.org` | Telegram Bot API server. Change it only for a self-hosted Bot API server. |
-| `GIT_ARCHIVE_NOTIFY_LANG` | `tr` | Language of the notification text: `tr` or `en`. |
-| `GIT_ARCHIVE_BACKUP_S3_ENDPOINT` | empty | S3 endpoint, for example `https://s3.eu-central-1.amazonaws.com`. |
-| `GIT_ARCHIVE_BACKUP_S3_REGION` | `us-east-1` | Region used to sign the requests. |
-| `GIT_ARCHIVE_BACKUP_S3_BUCKET` | empty | Bucket that receives the bundles. |
-| `GIT_ARCHIVE_BACKUP_S3_PREFIX` | empty | Key prefix of the bundles. |
-| `GIT_ARCHIVE_BACKUP_S3_ACCESS_KEY_ID` | empty | Access key ID. |
-| `GIT_ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY` | empty | Secret access key. |
-| `GIT_ARCHIVE_BACKUP_S3_PATH_STYLE` | `false` | `true` puts the bucket name into the path instead of the host name. MinIO and most self-hosted storage need it. |
-| `GIT_ARCHIVE_BACKUP_INTERVAL_HOURS` | `24` | Hours between two backups. |
-| `GIT_ARCHIVE_BACKUP_KEEP` | `7` | Bundles kept per repository. |
+| `KEHRIBAR_ADMIN_USERNAME` | (required) | Admin username for the web interface and for `git clone`. |
+| `KEHRIBAR_ADMIN_PASSWORD` | (required) | Admin password. |
+| `KEHRIBAR_SECRET_KEY` | (required) | 64 hex characters. Encrypts the stored tokens. |
+| `KEHRIBAR_LISTEN_ADDR` | empty | Listen address. Empty listens on `[::]:8600`, or on `0.0.0.0:8600` without IPv6. |
+| `KEHRIBAR_DATA_DIR` | `/data` | Database and mirrors. |
+| `KEHRIBAR_SYNC_INTERVAL_MINUTES` | `360` | Global sync interval. Also the scan interval of watched sources. |
+| `KEHRIBAR_SYNC_CONCURRENCY` | `2` | Syncs that run at the same time. |
+| `KEHRIBAR_GIT_TIMEOUT_SECONDS` | `3600` | Time limit of one git command. |
+| `KEHRIBAR_SESSION_TTL_HOURS` | `168` | Lifetime of a web session. |
+| `KEHRIBAR_COOKIE_SECURE` | `false` | Set to `true` when the site is served over HTTPS. The clone URL on the repository page then uses `https`. |
+| `KEHRIBAR_LOG_LEVEL` | `info` | Log filter, for example `debug` or `kehribar=debug`. |
+| `KEHRIBAR_TRUSTED_PROXIES` | empty | Addresses or ranges of the reverse proxies in front of the app, separated by commas, for example `10.0.0.0/8, 172.16.0.0/12`. For a connection from one of them, the client address comes from `X-Forwarded-For`, so 10 failed logins lock out that client only, not everyone behind the proxy. Empty ignores the header. |
+| `KEHRIBAR_FSCK_INTERVAL_DAYS` | `7` | Days between two `git fsck` runs per repository. `0` turns the check off. |
+| `KEHRIBAR_REPACK_INTERVAL_DAYS` | `7` | Days between two `git repack` runs per repository. `0` turns the repack off. |
+| `KEHRIBAR_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page, and push webhook URLs start with it. |
+| `KEHRIBAR_NOTIFY_WEBHOOK_URL` | empty | Every notification is POSTed to this URL as JSON. |
+| `KEHRIBAR_NOTIFY_TELEGRAM_BOT_TOKEN` | empty | Telegram bot token from BotFather. |
+| `KEHRIBAR_NOTIFY_TELEGRAM_CHAT_ID` | empty | Chat that receives the Telegram notifications. |
+| `KEHRIBAR_NOTIFY_TELEGRAM_API_URL` | `https://api.telegram.org` | Telegram Bot API server. Change it only for a self-hosted Bot API server. |
+| `KEHRIBAR_NOTIFY_LANG` | `tr` | Language of the notification text: `tr` or `en`. |
+| `KEHRIBAR_BACKUP_S3_ENDPOINT` | empty | S3 endpoint, for example `https://s3.eu-central-1.amazonaws.com`. |
+| `KEHRIBAR_BACKUP_S3_REGION` | `us-east-1` | Region used to sign the requests. |
+| `KEHRIBAR_BACKUP_S3_BUCKET` | empty | Bucket that receives the bundles. |
+| `KEHRIBAR_BACKUP_S3_PREFIX` | empty | Key prefix of the bundles. |
+| `KEHRIBAR_BACKUP_S3_ACCESS_KEY_ID` | empty | Access key ID. |
+| `KEHRIBAR_BACKUP_S3_SECRET_ACCESS_KEY` | empty | Secret access key. |
+| `KEHRIBAR_BACKUP_S3_PATH_STYLE` | `false` | `true` puts the bucket name into the path instead of the host name. MinIO and most self-hosted storage need it. |
+| `KEHRIBAR_BACKUP_INTERVAL_HOURS` | `24` | Hours between two backups. |
+| `KEHRIBAR_BACKUP_KEEP` | `7` | Bundles kept per repository. |
 
 A sync, maintenance or backup number outside the range that the settings page accepts stops the start with an error: sync interval 1 to 10080 minutes, concurrency 1 to 32, git timeout 10 to 86400 seconds, fsck and repack interval 0 to 365 days, backup interval 1 to 168 hours, bundles kept 1 to 365.
 
@@ -104,11 +104,11 @@ The settings page can override the sync, maintenance, notification and backup se
 
 ## Excluding refs
 
-A host and a repository can each have a list of ref patterns, one per line, for example `refs/pull/*` or `refs/merge-requests/*`. The patterns of the host and of the repository together are left out of every later fetch. Refs that the archive already holds stay. A pattern starts with `refs/`, holds at most one `*`, and cannot name the `refs/git-archive/` refs.
+A host and a repository can each have a list of ref patterns, one per line, for example `refs/pull/*` or `refs/merge-requests/*`. The patterns of the host and of the repository together are left out of every later fetch. Refs that the archive already holds stay. A pattern starts with `refs/`, holds at most one `*`, and cannot name the `refs/kehribar/` refs.
 
 ## Integrity checks and maintenance
 
-After a successful sync, git-archive runs `git fsck` when the check interval has passed, and `git pack-refs --all` followed by `git repack -a -d --keep-unreachable` when the repack interval has passed. The repack keeps every object, including the rewritten history. A failed check marks the repository "Error", and the check runs again after every sync until it passes. The repository page shows the time of the last check and of the last repack, and the space the repack saved.
+After a successful sync, Kehribar runs `git fsck` when the check interval has passed, and `git pack-refs --all` followed by `git repack -a -d --keep-unreachable` when the repack interval has passed. The repack keeps every object, including the rewritten history. A failed check marks the repository "Error", and the check runs again after every sync until it passes. The repository page shows the time of the last check and of the last repack, and the space the repack saved.
 
 ## Notifications
 
@@ -119,8 +119,8 @@ The webhook body is JSON:
 ```json
 {
   "event": "repo_failed",
-  "text": "git-archive: github.com/owner/name could not be synced. ...",
-  "content": "git-archive: github.com/owner/name could not be synced. ...",
+  "text": "Kehribar: github.com/owner/name could not be synced. ...",
+  "content": "Kehribar: github.com/owner/name could not be synced. ...",
   "repo": { "id": 1, "name": "github.com/owner/name", "url": "https://github.com/owner/name" },
   "source": null,
   "status": "unreachable",
@@ -135,7 +135,7 @@ The webhook body is JSON:
 
 ## Backups
 
-When the endpoint, the bucket, the access key ID and the secret access key are set, git-archive uploads a full `git bundle` of every repository whose refs changed since its last upload, once per backup interval. The wiki gets its own bundle. The keys are:
+When the endpoint, the bucket, the access key ID and the secret access key are set, Kehribar uploads a full `git bundle` of every repository whose refs changed since its last upload, once per backup interval. The wiki gets its own bundle. The keys are:
 
 ```
 <prefix>/<host>/<owner>/<name>/<unix-time>.bundle
@@ -171,7 +171,7 @@ Tokens with read access are enough:
 - GitHub: a fine-grained personal access token with read access to "Contents" and "Metadata" of the repositories, or a classic token with the `repo` scope for private repositories.
 - GitLab: a personal, group or project access token with `read_api` and `read_repository`.
 - Forgejo / Gitea: an access token with read permission for repositories, and for organizations and users when you import them.
-- Bitbucket Cloud: an API token with scopes (app passwords no longer work), created for the Bitbucket app with the `read:repository:bitbucket` scope. Put the email address of the Atlassian account in the username field. The REST API authenticates with that email; for Git, git-archive sends the fixed username `x-bitbucket-api-token-auth` that Bitbucket requires with API tokens.
+- Bitbucket Cloud: an API token with scopes (app passwords no longer work), created for the Bitbucket app with the `read:repository:bitbucket` scope. Put the email address of the Atlassian account in the username field. The REST API authenticates with that email; for Git, kehribar sends the fixed username `x-bitbucket-api-token-auth` that Bitbucket requires with API tokens.
 - Gitee: a personal access token with read access to repositories. The API receives it in the `access_token` query parameter.
 - Azure DevOps: a personal access token with the "Code (Read)" scope (`vso.code`). Azure DevOps ignores the username.
 - SourceHut: a personal access token for git.sr.ht with read access to profile and repositories. The SourceHut API does not answer without a token.
@@ -207,7 +207,7 @@ cp <oid> name.git/lfs/objects/${oid:0:2}/${oid:2:2}/<oid>
 
 ## Markdown images
 
-After every successful sync, git-archive reads the Markdown files (`.md`, `.markdown`) of the default branch, and the Markdown pages of the archived wiki, and downloads the external images they show: Markdown images and HTML `<img>` elements with an `http` or `https` URL. A rendered README, the rendered view of a Markdown file and a Markdown wiki page then show the archived copy from `/repos/<id>/asset/<sha256>` instead of the external address; the "Source" switch of a Markdown file shows its text. Images of AsciiDoc, reStructuredText and other wiki pages are not downloaded and stay external.
+After every successful sync, Kehribar reads the Markdown files (`.md`, `.markdown`) of the default branch, and the Markdown pages of the archived wiki, and downloads the external images they show: Markdown images and HTML `<img>` elements with an `http` or `https` URL. A rendered README, the rendered view of a Markdown file and a Markdown wiki page then show the archived copy from `/repos/<id>/asset/<sha256>` instead of the external address; the "Source" switch of a Markdown file shows its text. Images of AsciiDoc, reStructuredText and other wiki pages are not downloaded and stay external.
 
 - At most 200 images per repository and its wiki together, in the order the files name them, repository files first. The repository page says when the files name more.
 - At most 5 MB per image, and only answers with an `image/*` content type. A request may take 20 seconds and follow 3 redirects.
@@ -216,7 +216,7 @@ After every successful sync, git-archive reads the Markdown files (`.md`, `.mark
 - The files are stored in `/data/assets/<sha256>`, once for every repository that shows the same image. The copies are served in a sandbox (`Content-Security-Policy: sandbox; default-src 'none'`), so an SVG image cannot run a script.
 - Deleting a repository deletes its image records and every stored file that no repository uses any more. A file younger than an hour is kept until a later sync or deletion, because a sync running at the same time may still record it.
 
-The backup uploads every archived image once to `<prefix>/<host>/<owner>/<name>/assets/<sha256>`. The database (`/data/git-archive.db`) holds which image URL belongs to which file, so restore the images together with it: copy the downloaded objects to `/data/assets/` with the same names. Without the database, a sync downloads the images again from their sources, and an image whose source is gone stays external.
+The backup uploads every archived image once to `<prefix>/<host>/<owner>/<name>/assets/<sha256>`. The database (`/data/kehribar.db`) holds which image URL belongs to which file, so restore the images together with it: copy the downloaded objects to `/data/assets/` with the same names. Without the database, a sync downloads the images again from their sources, and an image whose source is gone stays external.
 
 ## Export and import
 
@@ -224,7 +224,7 @@ The backup uploads every archived image once to `<prefix>/<host>/<owner>/<name>/
 
 "Import" adds the records of such a file that the archive does not have. A host matches by its name, a source by host, type and name, and a repository by its URL or its archive path. An existing record stays as it is. Every record goes through the checks of its form, and the result page names each record as added, already there or invalid, with the reason.
 
-A secret works only in an installation with the same `GIT_ARCHIVE_SECRET_KEY`. A secret that does not decrypt with the key of the importing installation is left out: the record is added without it, the result page marks it, and the token or key must be entered again. The import runs in one database transaction, so a database error leaves no part of the file behind. The file may be up to 32 MB.
+A secret works only in an installation with the same `KEHRIBAR_SECRET_KEY`. A secret that does not decrypt with the key of the importing installation is left out: the record is added without it, the result page marks it, and the token or key must be entered again. The import runs in one database transaction, so a database error leaves no part of the file behind. The file may be up to 32 MB.
 
 ## Importing users and organizations
 
@@ -258,10 +258,10 @@ A repository syncs at its interval. To sync it right after a push, create a webh
 http://localhost:8600/hooks/gaw_...
 ```
 
-- The URL is the secret: the token in it is random, stored as a SHA-256 hash and, encrypted with `GIT_ARCHIVE_SECRET_KEY`, for showing it again on the page. No webhook secret or signature is needed, and the payload is not read, so every provider works the same way.
+- The URL is the secret: the token in it is random, stored as a SHA-256 hash and, encrypted with `KEHRIBAR_SECRET_KEY`, for showing it again on the page. No webhook secret or signature is needed, and the payload is not read, so every provider works the same way.
 - A `POST` answers `202` and makes the repository due at once. A call while the repository syncs makes it sync once more when that sync finishes; several calls during one sync add up to that one more sync.
 - "Renew URL" replaces the token and the old URL answers `404`; "Remove" deletes it. Wrong tokens count against the per-address lockout of the login form.
-- The URL uses `GIT_ARCHIVE_PUBLIC_URL` when it is set, else the address the browser used.
+- The URL uses `KEHRIBAR_PUBLIC_URL` when it is set, else the address the browser used.
 
 ## REST API
 

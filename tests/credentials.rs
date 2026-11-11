@@ -16,12 +16,12 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::prelude::{BASE64_STANDARD, Engine as _};
-use git_archive::crypto::Cipher;
-use git_archive::db::hosts::{self, HostInput, Provider};
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::{self, unix_now};
-use git_archive::sync::SyncContext;
-use git_archive::sync::scheduler::Scheduler;
+use kehribar::crypto::Cipher;
+use kehribar::db::hosts::{self, HostInput, Provider};
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::{self, unix_now};
+use kehribar::sync::SyncContext;
+use kehribar::sync::scheduler::Scheduler;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -173,7 +173,7 @@ async fn setup() -> Setup {
         pool: db::open_in_memory().await.unwrap(),
         cipher: Cipher::new(&config.secret_key),
         config: Arc::new(config),
-        catalog: Arc::new(git_archive::i18n::Catalog::load().unwrap()),
+        catalog: Arc::new(kehribar::i18n::Catalog::load().unwrap()),
         locks: Default::default(),
         guard: Default::default(),
     };

@@ -6,8 +6,8 @@ mod common;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value, urlencode};
-use git_archive::db::hosts::{self, Provider};
-use git_archive::db::repos;
+use kehribar::db::hosts::{self, Provider};
+use kehribar::db::repos;
 
 const HOST_FORM: &str =
     "host=GitHub.com&provider=github&api_base_url=&username=bot&token=ghp_secret1";
@@ -289,7 +289,7 @@ async fn ssh_keys_are_generated_pasted_and_deleted_and_only_the_public_key_shows
     let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
     let public = host.ssh_public_key.clone().unwrap();
     assert!(public.starts_with("ssh-ed25519 "), "{public}");
-    assert!(public.ends_with(" git-archive@github.com"));
+    assert!(public.ends_with(" kehribar@github.com"));
     let private = decrypt(&t, host.ssh_key_enc.clone()).unwrap();
     assert!(private.contains("OPENSSH PRIVATE KEY"));
     let stored = host.ssh_key_enc.unwrap();

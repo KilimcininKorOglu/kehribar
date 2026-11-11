@@ -3,10 +3,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use git_archive::db::hosts::{Host, Provider};
-use git_archive::db::sources::SourceKind;
-use git_archive::git::Credentials;
-use git_archive::providers::{ProviderError, RemoteRepo, list_repos};
+use kehribar::db::hosts::{Host, Provider};
+use kehribar::db::sources::SourceKind;
+use kehribar::git::Credentials;
+use kehribar::providers::{ProviderError, RemoteRepo, list_repos};
 use serde_json::{Value, json};
 use wiremock::matchers::{body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};

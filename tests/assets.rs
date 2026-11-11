@@ -10,11 +10,11 @@ use std::time::{Duration, SystemTime};
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, archive_source, git_in, page, source_repo, urlencode};
-use git_archive::db::assets;
-use git_archive::db::repos;
-use git_archive::db::unix_now;
-use git_archive::git::mirror;
-use git_archive::sync::assets::{AddressGuard, MAX_IMAGES};
+use kehribar::db::assets;
+use kehribar::db::repos;
+use kehribar::db::unix_now;
+use kehribar::git::mirror;
+use kehribar::sync::assets::{AddressGuard, MAX_IMAGES};
 use sha2::Digest;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};

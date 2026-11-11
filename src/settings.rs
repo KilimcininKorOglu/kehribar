@@ -117,9 +117,9 @@ mod tests {
 
     fn config() -> Config {
         Config::from_lookup(|name| match name {
-            "GIT_ARCHIVE_ADMIN_USERNAME" | "GIT_ARCHIVE_ADMIN_PASSWORD" => Some("x".into()),
-            "GIT_ARCHIVE_SECRET_KEY" => Some("00".repeat(32)),
-            "GIT_ARCHIVE_SYNC_INTERVAL_MINUTES" => Some("120".into()),
+            "KEHRIBAR_ADMIN_USERNAME" | "KEHRIBAR_ADMIN_PASSWORD" => Some("x".into()),
+            "KEHRIBAR_SECRET_KEY" => Some("00".repeat(32)),
+            "KEHRIBAR_SYNC_INTERVAL_MINUTES" => Some("120".into()),
             _ => None,
         })
         .unwrap()

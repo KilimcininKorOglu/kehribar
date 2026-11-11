@@ -85,8 +85,8 @@ async fn report_change(ctx: &SyncContext, previous: Option<&str>, error: Option<
 /// Writes a small object, reads it back and deletes it.
 pub async fn test_target(target: &Target) -> Result<(), String> {
     let store = Store::new(target, s3::PART_SIZE)?;
-    let key = store.key(".git-archive-test");
-    let body = format!("git-archive {}", unix_now()).into_bytes();
+    let key = store.key(".kehribar-test");
+    let body = format!("kehribar {}", unix_now()).into_bytes();
     store.put_bytes(&key, body.clone()).await?;
     let read = store.get(&key).await?;
     store.delete(&key).await?;

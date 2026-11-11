@@ -48,7 +48,7 @@ impl Store {
         )
         .map_err(|err| format!("invalid S3 bucket: {err}"))?;
         let client = Client::builder()
-            .user_agent(concat!("git-archive/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("kehribar/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|err| format!("cannot create the HTTP client: {err}"))?;
         Ok(Self {

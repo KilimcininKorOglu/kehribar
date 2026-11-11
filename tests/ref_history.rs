@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 use axum::http::StatusCode;
 use common::{TestApp, body_text, git_in, source_repo};
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::unix_now;
-use git_archive::db::usage::DAY_SECONDS;
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::unix_now;
+use kehribar::db::usage::DAY_SECONDS;
 
 /// A source with `main`, `feature` (one commit ahead), `gone`, `wip-1`,
 /// the tag `v1` and a pull request ref, archived with `refs/heads/wip-*`
@@ -178,7 +178,7 @@ async fn history_page_shows_a_past_day() {
     let new_main = commit_on(&source, "main", "today");
     sync(&t).await;
 
-    let day = |days_ago: i64| git_archive::web::format::date(unix_now() - days_ago * DAY_SECONDS);
+    let day = |days_ago: i64| kehribar::web::format::date(unix_now() - days_ago * DAY_SECONDS);
     let past = page(&t, &format!("/repos/1/history?at={}", day(5))).await;
     assert!(
         past.contains(&format!("/repos/1/commit/{old_main}")),
@@ -279,7 +279,7 @@ async fn an_archive_without_history_starts_from_its_kept_commits() {
     sync(&t).await;
     assert_eq!(rows(&t).await.len(), 5);
 
-    let yesterday = git_archive::web::format::date(unix_now() - DAY_SECONDS);
+    let yesterday = kehribar::web::format::date(unix_now() - DAY_SECONDS);
     let html = page(&t, &format!("/repos/1/history?at={yesterday}")).await;
     assert!(html.contains("alert-warn"), "{html}");
     assert!(html.contains("Bu tarihten sonra yeniden yazılan ref"));

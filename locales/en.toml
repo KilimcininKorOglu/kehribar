@@ -1,5 +1,5 @@
 [app]
-name = "git-archive"
+name = "Kehribar"
 tagline = "Git repository archive"
 skip = "Skip to content"
 
@@ -248,13 +248,13 @@ bad_expiry = "Choose one of the offered expiry times."
 
 [transfer]
 title = "Export and import"
-intro = "Save the hosts, sources and repositories to a JSON file, or take them from another installation. Tokens and SSH keys stay encrypted in the file and work only in an installation with the same GIT_ARCHIVE_SECRET_KEY. The Git data of the repositories is not in the file."
+intro = "Save the hosts, sources and repositories to a JSON file, or take them from another installation. Tokens and SSH keys stay encrypted in the file and work only in an installation with the same KEHRIBAR_SECRET_KEY. The Git data of the repositories is not in the file."
 export = "Download as JSON"
 file = "File to import"
 file_help = "Records that are not in the archive are added. Existing records stay as they are."
 import = "Import"
 no_file = "Select an export file."
-bad_file = "This file is not a git-archive export file."
+bad_file = "This file is not a Kehribar export file."
 bad_format = "The format version of this file is not supported."
 no_host = "The host of the source is neither in the archive nor in the file."
 host_cannot_list = "The provider of this host cannot list repositories."
@@ -428,7 +428,7 @@ exclude = "Refs to leave out"
 exclude_host_help = "Optional. One pattern per line, for example refs/pull/*. No repository on this host fetches matching refs any more. Refs already in the archive stay."
 exclude_repo_help = "Optional. One pattern per line, for example refs/pull/*. Matching refs are not fetched any more. Refs already in the archive stay."
 from_host = "The patterns of the host apply too:"
-invalid = "A ref pattern is not valid. Each pattern starts with refs/ and has at most one *. Spaces and the characters ^ : ? [ \\ ~ are not allowed, and refs/git-archive/ cannot be left out."
+invalid = "A ref pattern is not valid. Each pattern starts with refs/ and has at most one *. Spaces and the characters ^ : ? [ \\ ~ are not allowed, and refs/kehribar/ cannot be left out."
 
 [cred]
 title = "Access"
@@ -574,7 +574,7 @@ s3_endpoint_help = "For example https://s3.eu-central-1.amazonaws.com, https://<
 s3_region = "Region"
 s3_bucket = "Bucket"
 s3_prefix = "Key prefix"
-s3_prefix_help = "Bundles are uploaded below this folder, for example git-archive. Empty uploads to the root of the bucket."
+s3_prefix_help = "Bundles are uploaded below this folder, for example kehribar. Empty uploads to the root of the bucket."
 s3_access_key_id = "Access key ID"
 s3_secret = "Secret access key"
 s3_secret_keep = "A secret access key is stored. Leave empty to keep it."

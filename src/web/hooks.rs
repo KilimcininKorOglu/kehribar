@@ -18,7 +18,7 @@ use crate::db::unix_now;
 use crate::error::AppError;
 
 /// The readable start of a webhook token.
-pub const WEBHOOK_PREFIX: &str = "gaw_";
+pub const WEBHOOK_PREFIX: &str = "khw_";
 
 /// `<site>/hooks/<token>`; the public URL setting wins over the address the
 /// browser used.

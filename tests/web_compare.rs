@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 
 use axum::http::StatusCode;
 use common::{TestApp, archive_source, git_in, page, source_repo};
-use git_archive::web::compare::MAX_COMMITS;
+use kehribar::web::compare::MAX_COMMITS;
 
 /// A source whose `feature` branch adds two commits to `main`, whose
 /// `orphan` branch shares no history, and whose `long` branch adds

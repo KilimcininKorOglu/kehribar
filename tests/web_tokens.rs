@@ -7,11 +7,11 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{TestApp, add_repo, page, post_page, shown_token, urlencode};
-use git_archive::db::repos;
-use git_archive::db::tokens::{self, TokenKind};
-use git_archive::db::unix_now;
-use git_archive::db::usage::DAY_SECONDS;
-use git_archive::web::auth::hash_token;
+use kehribar::db::repos;
+use kehribar::db::tokens::{self, TokenKind};
+use kehribar::db::unix_now;
+use kehribar::db::usage::DAY_SECONDS;
+use kehribar::web::auth::hash_token;
 
 async fn create(t: &TestApp, body: &str) -> (StatusCode, String) {
     post_page(t, "/settings/tokens", body).await
@@ -27,7 +27,7 @@ async fn a_new_token_is_shown_once_and_stored_as_a_hash() {
     let name = urlencode("backup server");
     let (status, html) = create(&t, &format!("kind=clone&name={name}&scope=all")).await;
     assert_eq!(status, StatusCode::OK, "{html}");
-    let token = shown_token(&html, "gac_");
+    let token = shown_token(&html, "khc_");
     assert!(html.contains("Bir daha gösterilmeyecek"));
 
     let found = tokens::find_valid(
@@ -79,7 +79,7 @@ async fn a_clone_token_for_selected_repositories_keeps_them() {
     let body = format!("kind=clone&name=ci&scope=selected&repo={one}&repo=999");
     let (status, html) = create(&t, &body).await;
     assert_eq!(status, StatusCode::OK, "{html}");
-    let token = shown_token(&html, "gac_");
+    let token = shown_token(&html, "khc_");
     let found = tokens::find_valid(
         &t.state.pool,
         &hash_token(&token),
@@ -113,7 +113,7 @@ async fn api_tokens_have_a_permission_and_an_expiry() {
     let t = TestApp::new().await;
     let (status, html) = create(&t, "kind=api&name=script&permission=write&expiry=30").await;
     assert_eq!(status, StatusCode::OK, "{html}");
-    let token = shown_token(&html, "gaa_");
+    let token = shown_token(&html, "kha_");
     assert!(html.contains("Authorization: Bearer"));
     let hash = hash_token(&token);
     let now = unix_now();
@@ -147,7 +147,7 @@ async fn api_tokens_have_a_permission_and_an_expiry() {
 async fn a_revoked_token_is_gone() {
     let t = TestApp::new().await;
     let (_, html) = create(&t, "kind=api&name=old&permission=read").await;
-    let token = shown_token(&html, "gaa_");
+    let token = shown_token(&html, "kha_");
     let id: i64 = sqlx::query_scalar("SELECT id FROM access_tokens")
         .fetch_one(&t.state.pool)
         .await

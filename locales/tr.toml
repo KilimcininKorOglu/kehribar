@@ -1,5 +1,5 @@
 [app]
-name = "git-archive"
+name = "Kehribar"
 tagline = "Git repo arşivi"
 skip = "İçeriğe geç"
 
@@ -241,13 +241,13 @@ bad_expiry = "Listedeki sürelerden birini seçin."
 
 [transfer]
 title = "Dışa ve içe aktarma"
-intro = "Sunucuları, kaynakları ve repoları bir JSON dosyasına kaydedin veya başka bir kurulumdan alın. Token'lar ve SSH anahtarları dosyada şifreli durur ve yalnız aynı GIT_ARCHIVE_SECRET_KEY ile çalışan bir kurulumda işe yarar. Repoların Git verisi dosyaya girmez."
+intro = "Sunucuları, kaynakları ve repoları bir JSON dosyasına kaydedin veya başka bir kurulumdan alın. Token'lar ve SSH anahtarları dosyada şifreli durur ve yalnız aynı KEHRIBAR_SECRET_KEY ile çalışan bir kurulumda işe yarar. Repoların Git verisi dosyaya girmez."
 export = "JSON olarak indir"
 file = "İçe aktarılacak dosya"
 file_help = "Arşivde olmayan kayıtlar eklenir, var olan kayıtlar değişmez."
 import = "İçe aktar"
 no_file = "Bir dışa aktarma dosyası seçin."
-bad_file = "Bu dosya bir git-archive dışa aktarma dosyası değil."
+bad_file = "Bu dosya bir Kehribar dışa aktarma dosyası değil."
 bad_format = "Bu dosyanın biçim sürümü desteklenmiyor."
 no_host = "Kaynağın sunucusu ne arşivde ne de dosyada var."
 host_cannot_list = "Bu sunucunun sağlayıcısı repo listeleyemiyor."
@@ -417,7 +417,7 @@ exclude = "Arşive alınmayacak ref'ler"
 exclude_host_help = "İsteğe bağlı. Her satıra bir desen yazın, örneğin refs/pull/*. Bu sunucudaki repolarda eşleşen ref'ler artık çekilmez. Arşivde zaten bulunan ref'ler silinmez."
 exclude_repo_help = "İsteğe bağlı. Her satıra bir desen yazın, örneğin refs/pull/*. Eşleşen ref'ler artık çekilmez. Arşivde zaten bulunan ref'ler silinmez."
 from_host = "Sunucu ayarlarındaki desenler de uygulanır:"
-invalid = "Ref desenlerinden biri geçersiz. Her desen refs/ ile başlamalı ve en fazla bir * içermeli. Boşluk ve ^ : ? [ \\ ~ karakterleri kullanılamaz, refs/git-archive/ altı da dışlanamaz."
+invalid = "Ref desenlerinden biri geçersiz. Her desen refs/ ile başlamalı ve en fazla bir * içermeli. Boşluk ve ^ : ? [ \\ ~ karakterleri kullanılamaz, refs/kehribar/ altı da dışlanamaz."
 
 [cred]
 title = "Erişim"
@@ -561,7 +561,7 @@ s3_endpoint_help = "Örneğin https://s3.eu-central-1.amazonaws.com, https://<he
 s3_region = "Bölge (region)"
 s3_bucket = "Bucket"
 s3_prefix = "Anahtar öneki"
-s3_prefix_help = "Bundle'lar bu klasörün altına yüklenir, örneğin git-archive. Boş bırakırsanız bucket'ın köküne yüklenir."
+s3_prefix_help = "Bundle'lar bu klasörün altına yüklenir, örneğin kehribar. Boş bırakırsanız bucket'ın köküne yüklenir."
 s3_access_key_id = "Access key ID"
 s3_secret = "Secret access key"
 s3_secret_keep = "Kayıtlı bir secret access key var. Değiştirmek istemiyorsanız boş bırakın."

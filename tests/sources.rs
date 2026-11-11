@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value};
-use git_archive::db::hosts::{self, HostInput, Provider};
-use git_archive::db::repos;
-use git_archive::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
-use git_archive::db::unix_now;
+use kehribar::db::hosts::{self, HostInput, Provider};
+use kehribar::db::repos;
+use kehribar::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
+use kehribar::db::unix_now;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -221,7 +221,7 @@ async fn name_and_archived_filters_decide_what_a_scan_adds() {
     )
     .await;
     let report = t.state.scheduler.context().clone();
-    let scanned = git_archive::sync::source_scan::scan(&report, &source)
+    let scanned = kehribar::sync::source_scan::scan(&report, &source)
         .await
         .unwrap();
     assert_eq!((scanned.listed, scanned.added, scanned.filtered), (5, 2, 3));

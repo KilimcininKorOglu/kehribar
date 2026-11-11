@@ -6,9 +6,9 @@ mod common;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value, urlencode};
-use git_archive::db::repos::{self, RepoStatus};
-use git_archive::db::unix_now;
-use git_archive::settings;
+use kehribar::db::repos::{self, RepoStatus};
+use kehribar::db::unix_now;
+use kehribar::settings;
 
 const URL: &str = "https%3A%2F%2Fgithub.com%2Frust-lang%2Frust.git";
 
@@ -392,13 +392,13 @@ async fn delete_needs_the_exact_name_and_removes_the_archive() {
     let t = TestApp::new().await;
     t.post("/repos", &format!("url={URL}")).await;
     let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
-    let dir = git_archive::repo_url::archive_dir(
+    let dir = kehribar::repo_url::archive_dir(
         &t.state.config.data_dir,
         &repo.host,
         &repo.owner,
         &repo.name,
     );
-    let wiki = git_archive::git::mirror::wiki_dir(&dir);
+    let wiki = kehribar::git::mirror::wiki_dir(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::create_dir_all(&wiki).unwrap();
 

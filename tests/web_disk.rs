@@ -6,9 +6,9 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{TestApp, body_text};
-use git_archive::db::repos::{self, NewRepo, RepoStatus, SyncOutcome};
-use git_archive::db::unix_now;
-use git_archive::db::usage::{self, DAY_SECONDS};
+use kehribar::db::repos::{self, NewRepo, RepoStatus, SyncOutcome};
+use kehribar::db::unix_now;
+use kehribar::db::usage::{self, DAY_SECONDS};
 
 async fn add_repo(pool: &sqlx::SqlitePool, name: &str, size: i64, lfs: i64) -> i64 {
     let url = format!("https://example.com/team/{name}");

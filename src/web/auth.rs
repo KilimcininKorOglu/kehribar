@@ -22,7 +22,7 @@ use super::prefs::Prefs;
 use crate::db::{self, sessions};
 use crate::error::AppError;
 
-pub const SESSION_COOKIE: &str = "ga_session";
+pub const SESSION_COOKIE: &str = "kh_session";
 
 /// Failed logins allowed from one address inside [`LOCKOUT_WINDOW`].
 pub const MAX_FAILED_LOGINS: u32 = 10;

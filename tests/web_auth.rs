@@ -14,16 +14,16 @@ use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use common::{PASSWORD, USER, body_text, header_value, send, test_config};
-use git_archive::db;
-use git_archive::i18n::Catalog;
-use git_archive::web::{self, AppState};
+use kehribar::db;
+use kehribar::i18n::Catalog;
+use kehribar::web::{self, AppState};
 
 const FORM: &str = "application/x-www-form-urlencoded";
 
 /// The router keeps no files on disk for these tests, so the data directory
 /// is never created.
 async fn app() -> Router {
-    let config = test_config(std::path::Path::new("/nonexistent/git-archive-test"));
+    let config = test_config(std::path::Path::new("/nonexistent/kehribar-test"));
     let pool = db::open_in_memory().await.unwrap();
     let state = AppState::new(pool, config, Catalog::load().unwrap());
     web::router(state).layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))))
@@ -112,7 +112,7 @@ async fn login_sets_a_strict_http_only_cookie_and_opens_private_pages() {
     let response = send(&app, login_request(USER, PASSWORD, "/")).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let set_cookie = header_value(&response, header::SET_COOKIE);
-    assert!(set_cookie.starts_with("ga_session="));
+    assert!(set_cookie.starts_with("kh_session="));
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("SameSite=Strict"));
 
@@ -227,7 +227,7 @@ async fn cross_site_post_is_refused_even_with_valid_credentials() {
 #[tokio::test]
 async fn repeated_failures_lock_the_login() {
     let app = app().await;
-    for _ in 0..git_archive::web::auth::MAX_FAILED_LOGINS {
+    for _ in 0..kehribar::web::auth::MAX_FAILED_LOGINS {
         let response = send(&app, login_request(USER, "wrong", "/")).await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
@@ -247,14 +247,14 @@ fn login_from(client: &str, password: &str) -> Request<Body> {
 
 #[tokio::test]
 async fn behind_a_trusted_proxy_failures_lock_only_their_client() {
-    let mut config = test_config(std::path::Path::new("/nonexistent/git-archive-test"));
+    let mut config = test_config(std::path::Path::new("/nonexistent/kehribar-test"));
     // The test connection comes from 192.0.2.7, the proxy.
-    config.trusted_proxies = git_archive::proxy::parse_list("192.0.2.0/24").unwrap();
+    config.trusted_proxies = kehribar::proxy::parse_list("192.0.2.0/24").unwrap();
     let pool = db::open_in_memory().await.unwrap();
     let state = AppState::new(pool, config, Catalog::load().unwrap());
     let app = web::router(state).layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))));
 
-    for _ in 0..git_archive::web::auth::MAX_FAILED_LOGINS {
+    for _ in 0..kehribar::web::auth::MAX_FAILED_LOGINS {
         let response = send(&app, login_from("198.51.100.1", "wrong")).await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
@@ -268,7 +268,7 @@ async fn behind_a_trusted_proxy_failures_lock_only_their_client() {
 #[tokio::test]
 async fn without_a_trusted_proxy_the_forwarded_header_changes_nothing() {
     let app = app().await;
-    for _ in 0..git_archive::web::auth::MAX_FAILED_LOGINS {
+    for _ in 0..kehribar::web::auth::MAX_FAILED_LOGINS {
         send(&app, login_from("198.51.100.1", "wrong")).await;
     }
     // A client cannot escape the lock by naming another address.
@@ -294,8 +294,8 @@ async fn preferences_are_saved_in_cookies_and_applied() {
         .iter()
         .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_owned())
         .collect();
-    assert!(cookies.contains(&"ga_theme=dark".to_owned()));
-    assert!(cookies.contains(&"ga_lang=en".to_owned()));
+    assert!(cookies.contains(&"kh_theme=dark".to_owned()));
+    assert!(cookies.contains(&"kh_lang=en".to_owned()));
 
     let page = send(
         &app,

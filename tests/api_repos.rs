@@ -7,7 +7,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::{TestApp, add_repo, api_call, create_token, header_value, send};
-use git_archive::db::{repos, unix_now};
+use kehribar::db::{repos, unix_now};
 use serde_json::{Value, json};
 
 /// An app and an API token that may write.
@@ -173,7 +173,7 @@ async fn a_patch_changes_only_the_fields_it_names() {
         &token,
         "PATCH",
         &path,
-        json!({ "ref_exclude": ["refs/git-archive/x"] }),
+        json!({ "ref_exclude": ["refs/kehribar/x"] }),
     )
     .await;
     assert_eq!(

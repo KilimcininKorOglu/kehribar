@@ -214,11 +214,11 @@ mod tests {
 
     fn config() -> Config {
         Config::from_lookup(|name| match name {
-            "GIT_ARCHIVE_ADMIN_USERNAME" | "GIT_ARCHIVE_ADMIN_PASSWORD" => Some("x".into()),
-            "GIT_ARCHIVE_SECRET_KEY" => Some("00".repeat(32)),
-            "GIT_ARCHIVE_BACKUP_S3_ENDPOINT" => Some("https://s3.example".into()),
-            "GIT_ARCHIVE_BACKUP_S3_BUCKET" => Some("env-bucket".into()),
-            "GIT_ARCHIVE_BACKUP_S3_ACCESS_KEY_ID" => Some("env-key".into()),
+            "KEHRIBAR_ADMIN_USERNAME" | "KEHRIBAR_ADMIN_PASSWORD" => Some("x".into()),
+            "KEHRIBAR_SECRET_KEY" => Some("00".repeat(32)),
+            "KEHRIBAR_BACKUP_S3_ENDPOINT" => Some("https://s3.example".into()),
+            "KEHRIBAR_BACKUP_S3_BUCKET" => Some("env-bucket".into()),
+            "KEHRIBAR_BACKUP_S3_ACCESS_KEY_ID" => Some("env-key".into()),
             _ => None,
         })
         .unwrap()

@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use git_archive::git::maintenance;
-use git_archive::git::mirror::{self, REWRITTEN_REF_PREFIX};
-use git_archive::git::{Git, GitErrorKind};
+use kehribar::git::maintenance;
+use kehribar::git::mirror::{self, REWRITTEN_REF_PREFIX};
+use kehribar::git::{Git, GitErrorKind};
 use tempfile::TempDir;
 
 /// A working repository that plays the source server.
@@ -106,7 +106,7 @@ fn refs(dir: &Path) -> BTreeMap<String, String> {
 
 fn without_archive_refs(refs: BTreeMap<String, String>) -> BTreeMap<String, String> {
     refs.into_iter()
-        .filter(|(name, _)| !name.starts_with("refs/git-archive/"))
+        .filter(|(name, _)| !name.starts_with("refs/kehribar/"))
         .collect()
 }
 
@@ -356,7 +356,7 @@ async fn source_cannot_write_archive_refs() {
     let commit = source.commit("one");
     source.git(&[
         "update-ref",
-        "refs/git-archive/rewritten/1/heads/main",
+        "refs/kehribar/rewritten/1/heads/main",
         &commit,
     ]);
     source.sync(100).await;
@@ -368,7 +368,7 @@ async fn source_cannot_write_archive_refs() {
         !source
             .archive_refs()
             .keys()
-            .any(|name| name.starts_with("refs/git-archive/"))
+            .any(|name| name.starts_with("refs/kehribar/"))
     );
 }
 

@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value, urlencode};
-use git_archive::config::Config;
-use git_archive::crypto::Cipher;
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::{self, unix_now};
-use git_archive::i18n::Catalog;
-use git_archive::notify::{self, Event};
-use git_archive::sync::SyncContext;
-use git_archive::sync::scheduler::Scheduler;
+use kehribar::config::Config;
+use kehribar::crypto::Cipher;
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::{self, unix_now};
+use kehribar::i18n::Catalog;
+use kehribar::notify::{self, Event};
+use kehribar::sync::SyncContext;
+use kehribar::sync::scheduler::Scheduler;
 use serde_json::Value;
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -105,7 +105,7 @@ async fn a_repository_is_reported_when_it_fails_and_when_it_recovers() {
     let text = failed["text"].as_str().unwrap();
     assert!(
         text.starts_with(
-            "git-archive: local/team/project güncellenemedi. Durum: Kaynağa ulaşılamıyor."
+            "Kehribar: local/team/project güncellenemedi. Durum: Kaynağa ulaşılamıyor."
         ),
         "{text}"
     );
@@ -136,7 +136,7 @@ async fn telegram_gets_the_text_and_errors_never_show_the_token() {
     config.notify.telegram_api_url = server.uri();
     config.notify.telegram_bot_token = Some("123:secret".into());
     config.notify.telegram_chat_id = Some("42".into());
-    config.notify.lang = git_archive::i18n::Lang::En;
+    config.notify.lang = kehribar::i18n::Lang::En;
     let ctx = context(config.clone(), db::open_in_memory().await.unwrap());
 
     notify::deliver(&ctx, &Event::Test).await.unwrap();
@@ -144,7 +144,7 @@ async fn telegram_gets_the_text_and_errors_never_show_the_token() {
     let body: Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(
         body["text"],
-        "git-archive: This is a test notification. The notification settings work."
+        "Kehribar: This is a test notification. The notification settings work."
     );
 
     // A refused token: the error names the cause, not the token.

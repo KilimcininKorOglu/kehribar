@@ -13,7 +13,7 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 pub fn client() -> Result<Client, String> {
     Client::builder()
         .timeout(TIMEOUT)
-        .user_agent(concat!("git-archive/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("kehribar/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|err| format!("cannot create the HTTP client: {err}"))
 }

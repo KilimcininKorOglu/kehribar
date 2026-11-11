@@ -13,12 +13,12 @@ use tokio::process::{Child, ChildStdout, Command};
 
 /// Environment variables the credential helper reads. Their values reach
 /// only the `git` child process, never its arguments.
-const ENV_USERNAME: &str = "GIT_ARCHIVE_CRED_USERNAME";
-const ENV_PASSWORD: &str = "GIT_ARCHIVE_CRED_PASSWORD";
+const ENV_USERNAME: &str = "KEHRIBAR_CRED_USERNAME";
+const ENV_PASSWORD: &str = "KEHRIBAR_CRED_PASSWORD";
 
 /// Answers git's `get` request with the two variables above.
 const CREDENTIAL_HELPER: &str = "credential.helper=!f() { test \"$1\" = get || exit 0; \
-     printf 'username=%s\\npassword=%s\\n' \"$GIT_ARCHIVE_CRED_USERNAME\" \"$GIT_ARCHIVE_CRED_PASSWORD\"; }; f";
+     printf 'username=%s\\npassword=%s\\n' \"$KEHRIBAR_CRED_USERNAME\" \"$KEHRIBAR_CRED_PASSWORD\"; }; f";
 
 /// Longest stderr excerpt kept in an error message.
 const MAX_MESSAGE_LEN: usize = 600;
@@ -610,7 +610,7 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert!(
-            !args.iter().any(|a| a.contains("GIT_ARCHIVE_CRED")),
+            !args.iter().any(|a| a.contains("KEHRIBAR_CRED")),
             "{args:?}"
         );
     }

@@ -117,7 +117,7 @@ mod tests {
             "^refs/pull/*",
             "refs/pull:refs/x",
             "refs/a..b",
-            "refs/git-archive/rewritten/*",
+            "refs/kehribar/rewritten/*",
             "refs/heads/x.lock",
             "refs/heads/x/",
             "refs/heads/a?",

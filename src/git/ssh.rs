@@ -297,10 +297,10 @@ mod tests {
     #[tokio::test]
     async fn generated_keys_give_back_their_public_line() {
         let dir = tempfile::tempdir().unwrap();
-        let pair = generate(dir.path(), "git-archive@example").await.unwrap();
+        let pair = generate(dir.path(), "kehribar@example").await.unwrap();
         assert!(pair.private.contains("OPENSSH PRIVATE KEY"));
         assert!(pair.public.starts_with("ssh-ed25519 "), "{}", pair.public);
-        assert!(pair.public.ends_with(" git-archive@example"));
+        assert!(pair.public.ends_with(" kehribar@example"));
         // Nothing stays in the temporary folder.
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 

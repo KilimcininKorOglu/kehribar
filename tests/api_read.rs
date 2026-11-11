@@ -6,10 +6,10 @@ mod common;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, add_repo, api_call, api_request, create_token, header_value, send};
-use git_archive::db::hosts::{self, HostInput, Provider};
-use git_archive::db::sources::{self, NewSource, SourceKind, SourceOptions};
-use git_archive::db::{repos, sync_runs, unix_now};
-use git_archive::web::auth::MAX_FAILED_LOGINS;
+use kehribar::db::hosts::{self, HostInput, Provider};
+use kehribar::db::sources::{self, NewSource, SourceKind, SourceOptions};
+use kehribar::db::{repos, sync_runs, unix_now};
+use kehribar::web::auth::MAX_FAILED_LOGINS;
 use serde_json::Value;
 
 /// The status and the JSON body of a request without a body.
@@ -109,7 +109,7 @@ async fn guessing_tokens_locks_the_caller_out() {
     let t = TestApp::new().await;
     let reader = read_token(&t).await;
     for guess in 0..MAX_FAILED_LOGINS {
-        let wrong = format!("gaa_{guess:064}");
+        let wrong = format!("kha_{guess:064}");
         assert_eq!(
             call(&t, "GET", "/repos", Some(&wrong)).await.0,
             StatusCode::UNAUTHORIZED

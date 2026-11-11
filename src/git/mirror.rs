@@ -3,7 +3,7 @@
 //! The fetch never prunes, so a branch deleted at the source stays in the
 //! archive. When a ref moves to a commit that does not contain its old one
 //! (a force push), the old commit is kept under
-//! `refs/git-archive/rewritten/<unix time>/<ref>`.
+//! `refs/kehribar/rewritten/<unix time>/<ref>`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,8 +13,8 @@ use crate::ref_filter;
 
 /// Prefix of the refs that this archive creates. The fetch refspec excludes
 /// it, so the source can neither overwrite nor delete these refs.
-pub const ARCHIVE_REF_PREFIX: &str = "refs/git-archive/";
-pub const REWRITTEN_REF_PREFIX: &str = "refs/git-archive/rewritten/";
+pub const ARCHIVE_REF_PREFIX: &str = "refs/kehribar/";
+pub const REWRITTEN_REF_PREFIX: &str = "refs/kehribar/rewritten/";
 
 /// Settings applied to every archived repository on each sync.
 const REPO_CONFIG: &[(&str, &str)] = &[
@@ -561,7 +561,7 @@ pub async fn rescued_refs(
         .collect())
 }
 
-/// Reads `refs/git-archive/rewritten/<time>/<name without refs/>`.
+/// Reads `refs/kehribar/rewritten/<time>/<name without refs/>`.
 fn parse_rescued(full: &str, id: String) -> Option<RescuedRef> {
     let (at, short) = full.strip_prefix(REWRITTEN_REF_PREFIX)?.split_once('/')?;
     Some(RescuedRef {
@@ -742,10 +742,7 @@ mod tests {
     fn rescued_ref_names_give_time_and_ref() {
         let id = || "abc".to_owned();
         assert_eq!(
-            parse_rescued(
-                "refs/git-archive/rewritten/1700000000/heads/feature/x",
-                id()
-            ),
+            parse_rescued("refs/kehribar/rewritten/1700000000/heads/feature/x", id()),
             Some(RescuedRef {
                 at: 1_700_000_000,
                 name: "refs/heads/feature/x".into(),
@@ -754,7 +751,7 @@ mod tests {
         );
         assert_eq!(parse_rescued("refs/heads/main", id()), None);
         assert_eq!(
-            parse_rescued("refs/git-archive/rewritten/x/heads/a", id()),
+            parse_rescued("refs/kehribar/rewritten/x/heads/a", id()),
             None
         );
     }

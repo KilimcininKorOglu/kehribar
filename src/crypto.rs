@@ -16,7 +16,7 @@ const NONCE_LEN: usize = 24;
 pub enum CryptoError {
     #[error("token encryption failed")]
     Encrypt,
-    #[error("stored token cannot be decrypted; GIT_ARCHIVE_SECRET_KEY may have changed")]
+    #[error("stored token cannot be decrypted; KEHRIBAR_SECRET_KEY may have changed")]
     Decrypt,
 }
 

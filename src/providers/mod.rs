@@ -300,7 +300,7 @@ fn connect(host: &Host, credentials: Option<&Credentials>) -> Result<Api, Provid
         .ok_or(ProviderError::Unsupported(host.provider.code()))?;
     let base = Url::parse(&base).map_err(|_| ProviderError::BadUrl(base.clone()))?;
     let client = Client::builder()
-        .user_agent(concat!("git-archive/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("kehribar/", env!("CARGO_PKG_VERSION")))
         .timeout(TIMEOUT)
         .redirect(redirect_policy())
         .build()?;

@@ -20,7 +20,7 @@ pub const ARCHIVE_CONFIG: [&str; 8] = [
     "-c",
     "filter.lfs.required=false",
     "-c",
-    "lfs.url=file:///nonexistent/git-archive-offline",
+    "lfs.url=file:///nonexistent/kehribar-offline",
     "-c",
     "lfs.skipdownloaderrors=true",
 ];

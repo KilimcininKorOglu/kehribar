@@ -7,14 +7,14 @@ mod common;
 use std::path::Path;
 use std::sync::Arc;
 
-use git_archive::crypto::Cipher;
-use git_archive::db::hosts::{self, HostInput, Provider};
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::sync_runs::RunOutcome;
-use git_archive::db::{self, sync_runs, unix_now};
-use git_archive::settings::{self, Overrides};
-use git_archive::sync::SyncContext;
-use git_archive::sync::scheduler::Scheduler;
+use kehribar::crypto::Cipher;
+use kehribar::db::hosts::{self, HostInput, Provider};
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::sync_runs::RunOutcome;
+use kehribar::db::{self, sync_runs, unix_now};
+use kehribar::settings::{self, Overrides};
+use kehribar::sync::SyncContext;
+use kehribar::sync::scheduler::Scheduler;
 use sqlx::SqlitePool;
 
 struct Setup {
@@ -30,7 +30,7 @@ async fn setup() -> Setup {
         pool: db::open_in_memory().await.unwrap(),
         cipher: Cipher::new(&config.secret_key),
         config: Arc::new(config),
-        catalog: Arc::new(git_archive::i18n::Catalog::load().unwrap()),
+        catalog: Arc::new(kehribar::i18n::Catalog::load().unwrap()),
         locks: Default::default(),
         guard: Default::default(),
     };
@@ -225,7 +225,7 @@ async fn a_rate_limited_fetch_is_postponed_and_keeps_the_state() {
     let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
     assert_eq!(repo.status, RepoStatus::Pending);
     assert_eq!(repo.last_error, None);
-    let wait = git_archive::providers::RATE_LIMIT_WAIT_SECONDS;
+    let wait = kehribar::providers::RATE_LIMIT_WAIT_SECONDS;
     assert!(
         repo.next_sync_at >= before + wait && repo.next_sync_at <= unix_now() + wait,
         "{}",
@@ -274,7 +274,7 @@ async fn a_failed_wiki_keeps_the_report_of_the_fetch() {
     let s = setup().await;
     let source = common::source_repo(s.dir.path(), "project");
     // A wiki whose branch points to an object it does not have.
-    let wiki = s.dir.path().join(git_archive::git::mirror::wiki_url(
+    let wiki = s.dir.path().join(kehribar::git::mirror::wiki_url(
         &source.to_string_lossy(),
         false,
     ));

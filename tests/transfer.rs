@@ -6,10 +6,10 @@ mod common;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value, urlencode};
-use git_archive::db::hosts::{self, Host};
-use git_archive::db::repos::{self, Repo, RepoSettings};
-use git_archive::db::sources::{self, NewSource, SourceKind, SourceOptions};
-use git_archive::db::unix_now;
+use kehribar::db::hosts::{self, Host};
+use kehribar::db::repos::{self, Repo, RepoSettings};
+use kehribar::db::sources::{self, NewSource, SourceKind, SourceOptions};
+use kehribar::db::unix_now;
 use serde_json::Value;
 
 const HOST_TOKEN: &str = "host-token-value";
@@ -263,7 +263,7 @@ async fn unreadable_files_change_nothing() {
     let cases: [(&[u8], &str); 3] = [
         (
             b"not json",
-            "Bu dosya bir git-archive dışa aktarma dosyası değil.",
+            "Bu dosya bir Kehribar dışa aktarma dosyası değil.",
         ),
         (
             br#"{"format": 2}"#,

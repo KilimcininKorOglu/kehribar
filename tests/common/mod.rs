@@ -10,11 +10,11 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, Response, StatusCode, header};
-use git_archive::config::Config;
-use git_archive::db;
-use git_archive::i18n::Catalog;
-use git_archive::sync::assets::AddressGuard;
-use git_archive::web::{self, AppState};
+use kehribar::config::Config;
+use kehribar::db;
+use kehribar::i18n::Catalog;
+use kehribar::sync::assets::AddressGuard;
+use kehribar::web::{self, AppState};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -34,10 +34,10 @@ pub fn config_with_key(data_dir: &Path, secret_key: &str) -> Config {
     let data_dir = data_dir.to_string_lossy().into_owned();
     let secret_key = secret_key.to_owned();
     Config::from_lookup(move |name| match name {
-        "GIT_ARCHIVE_ADMIN_USERNAME" => Some(USER.into()),
-        "GIT_ARCHIVE_ADMIN_PASSWORD" => Some(PASSWORD.into()),
-        "GIT_ARCHIVE_SECRET_KEY" => Some(secret_key.clone()),
-        "GIT_ARCHIVE_DATA_DIR" => Some(data_dir.clone()),
+        "KEHRIBAR_ADMIN_USERNAME" => Some(USER.into()),
+        "KEHRIBAR_ADMIN_PASSWORD" => Some(PASSWORD.into()),
+        "KEHRIBAR_SECRET_KEY" => Some(secret_key.clone()),
+        "KEHRIBAR_DATA_DIR" => Some(data_dir.clone()),
         _ => None,
     })
     .unwrap()
@@ -285,7 +285,7 @@ pub fn urlencode(text: &str) -> String {
 /// Adds the local repository at `source` as `local/team/project` and
 /// archives it with one scheduler tick, which must succeed.
 pub async fn archive_source(t: &TestApp, source: &Path, wiki_enabled: bool) -> db::repos::Repo {
-    use git_archive::db::repos::{self, NewRepo, RepoStatus};
+    use kehribar::db::repos::{self, NewRepo, RepoStatus};
 
     let url = source.to_string_lossy();
     let repo = NewRepo {
@@ -313,7 +313,7 @@ pub async fn archive_source(t: &TestApp, source: &Path, wiki_enabled: bool) -> d
 
 /// Records `example.com/team/<name>` without archiving it; returns its id.
 pub async fn add_repo(t: &TestApp, name: &str) -> i64 {
-    use git_archive::db::repos::{self, NewRepo};
+    use kehribar::db::repos::{self, NewRepo};
 
     let url = format!("https://example.com/team/{name}");
     let repo = NewRepo {
@@ -354,9 +354,9 @@ pub async fn create_token(t: &TestApp, body: &str) -> String {
     let (status, html) = post_page(t, "/settings/tokens", body).await;
     assert_eq!(status, StatusCode::OK, "{html}");
     let prefix = if body.contains("kind=clone") {
-        "gac_"
+        "khc_"
     } else {
-        "gaa_"
+        "kha_"
     };
     shown_token(&html, prefix)
 }

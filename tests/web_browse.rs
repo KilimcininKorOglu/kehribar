@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, git_in, header_value};
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::unix_now;
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::unix_now;
 
 const README: &str = "# Project\n\n<script>alert('readme')</script>\n\n![logo](img/logo.png) [guide](docs/guide.md)\n";
 const HOSTILE_MESSAGE: &str = "say hello <script>x</script>";
@@ -93,7 +93,7 @@ async fn page(t: &TestApp, uri: &str) -> String {
 }
 
 fn archive_dir(t: &TestApp) -> PathBuf {
-    git_archive::repo_url::archive_dir(&t.state.config.data_dir, "local", "team", "project")
+    kehribar::repo_url::archive_dir(&t.state.config.data_dir, "local", "team", "project")
 }
 
 /// The bytes of `name` in a tar.gz archive, read with the system `tar`.

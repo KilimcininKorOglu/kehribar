@@ -154,10 +154,10 @@ mod tests {
 
     fn config() -> Config {
         Config::from_lookup(|name| match name {
-            "GIT_ARCHIVE_ADMIN_USERNAME" | "GIT_ARCHIVE_ADMIN_PASSWORD" => Some("x".into()),
-            "GIT_ARCHIVE_SECRET_KEY" => Some("00".repeat(32)),
-            "GIT_ARCHIVE_NOTIFY_WEBHOOK_URL" => Some("https://env.example/hook".into()),
-            "GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_ID" => Some("42".into()),
+            "KEHRIBAR_ADMIN_USERNAME" | "KEHRIBAR_ADMIN_PASSWORD" => Some("x".into()),
+            "KEHRIBAR_SECRET_KEY" => Some("00".repeat(32)),
+            "KEHRIBAR_NOTIFY_WEBHOOK_URL" => Some("https://env.example/hook".into()),
+            "KEHRIBAR_NOTIFY_TELEGRAM_CHAT_ID" => Some("42".into()),
             _ => None,
         })
         .unwrap()

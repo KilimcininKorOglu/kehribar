@@ -24,7 +24,7 @@ use crate::db::unix_now;
 use crate::git::http_backend::{self, CgiRequest};
 use crate::repo_url;
 
-const REALM: &str = "Basic realm=\"git-archive\", charset=\"UTF-8\"";
+const REALM: &str = "Basic realm=\"kehribar\", charset=\"UTF-8\"";
 
 /// The two requests of a smart HTTP fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -14,8 +14,8 @@ use super::AppState;
 use super::auth::local_path;
 use crate::i18n::Lang;
 
-pub const THEME_COOKIE: &str = "ga_theme";
-pub const LANG_COOKIE: &str = "ga_lang";
+pub const THEME_COOKIE: &str = "kh_theme";
+pub const LANG_COOKIE: &str = "kh_lang";
 
 text_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn cookie_wins_over_accept_language() {
         let map = headers(&[
-            (header::COOKIE, "ga_lang=tr; ga_theme=dark"),
+            (header::COOKIE, "kh_lang=tr; kh_theme=dark"),
             (header::ACCEPT_LANGUAGE, "en-US"),
         ]);
         assert_eq!(
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn accept_language_applies_without_cookie_and_bad_values_are_ignored() {
         let map = headers(&[
-            (header::COOKIE, "ga_lang=xx; ga_theme=neon"),
+            (header::COOKIE, "kh_lang=xx; kh_theme=neon"),
             (header::ACCEPT_LANGUAGE, "en"),
         ]);
         assert_eq!(

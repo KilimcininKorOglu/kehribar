@@ -29,7 +29,7 @@ pub async fn export(ctx: PageContext) -> Result<Response, AppError> {
         (header::CONTENT_TYPE, "application/json"),
         (
             header::CONTENT_DISPOSITION,
-            "attachment; filename=\"git-archive-export.json\"",
+            "attachment; filename=\"kehribar-export.json\"",
         ),
         // The file holds encrypted secrets; no cache keeps a copy.
         (header::CACHE_CONTROL, "no-store"),

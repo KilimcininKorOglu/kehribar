@@ -15,9 +15,9 @@ use base64::prelude::{BASE64_STANDARD, Engine as _};
 use common::{
     PASSWORD, TestApp, USER, add_repo, create_token, git_in, header_value, send, source_repo,
 };
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::unix_now;
-use git_archive::web::{self, auth::MAX_FAILED_LOGINS};
+use kehribar::db::repos::{self, NewRepo, RepoStatus};
+use kehribar::db::unix_now;
+use kehribar::web::{self, auth::MAX_FAILED_LOGINS};
 
 const REPO_PATH: &str = "/git/local/team/project.git";
 
@@ -172,11 +172,7 @@ async fn mirror_clone_includes_the_rescued_history() {
     let mirror = work.join("mirror.git");
     let rescued = git_in(
         &mirror,
-        &[
-            "for-each-ref",
-            "--format=%(objectname)",
-            "refs/git-archive/",
-        ],
+        &["for-each-ref", "--format=%(objectname)", "refs/kehribar/"],
     );
     assert_eq!(rescued, old_head);
     git_in(
@@ -295,8 +291,7 @@ async fn push_is_refused() {
     assert!(!push.status.success());
 
     // The archive still holds the source's main.
-    let dir =
-        git_archive::repo_url::archive_dir(&t.state.config.data_dir, "local", "team", "project");
+    let dir = kehribar::repo_url::archive_dir(&t.state.config.data_dir, "local", "team", "project");
     assert_eq!(
         git_in(&dir, &["rev-parse", "refs/heads/main"]),
         git_in(&source, &["rev-parse", "main"])

@@ -8,7 +8,7 @@ use std::process::Command;
 
 use axum::http::StatusCode;
 use common::{TestApp, api_call, create_token};
-use git_archive::db::{hosts, sources};
+use kehribar::db::{hosts, sources};
 use serde_json::{Value, json};
 
 /// An app and an API token that may write.

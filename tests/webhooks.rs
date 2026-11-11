@@ -8,15 +8,15 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{TestApp, archive_source, page, send, source_repo};
-use git_archive::db::repos;
-use git_archive::db::sync_runs;
-use git_archive::web::auth::MAX_FAILED_LOGINS;
+use kehribar::db::repos;
+use kehribar::db::sync_runs;
+use kehribar::web::auth::MAX_FAILED_LOGINS;
 
 /// The webhook URL path the repository page shows.
 async fn webhook_path(t: &TestApp) -> Option<String> {
     let (_, html) = page(t, "/repos/1").await;
-    let start = html.find("/hooks/gaw_")?;
-    Some(html[start..start + "/hooks/gaw_".len() + 64].to_owned())
+    let start = html.find("/hooks/khw_")?;
+    Some(html[start..start + "/hooks/khw_".len() + 64].to_owned())
 }
 
 /// A call from the source server: no session, no CSRF token, any body.
@@ -56,7 +56,7 @@ async fn a_webhook_call_syncs_the_repository() {
         .fetch_one(&t.state.pool)
         .await
         .unwrap();
-    assert!(!String::from_utf8_lossy(&stored).contains("gaw_"));
+    assert!(!String::from_utf8_lossy(&stored).contains("khw_"));
 
     // Nothing is due; the webhook makes the repository due now.
     sqlx::query("UPDATE repos SET next_sync_at = 9999999999")
@@ -128,7 +128,7 @@ async fn a_renewed_or_removed_url_stops_working() {
 async fn guessing_tokens_locks_the_caller_out() {
     let (t, path) = with_webhook().await;
     for guess in 0..MAX_FAILED_LOGINS {
-        let wrong = format!("/hooks/gaw_{guess:064}");
+        let wrong = format!("/hooks/khw_{guess:064}");
         assert_eq!(call(&t, &wrong).await, StatusCode::NOT_FOUND);
     }
     assert_eq!(call(&t, &path).await, StatusCode::TOO_MANY_REQUESTS);

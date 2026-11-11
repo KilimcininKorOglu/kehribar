@@ -19,9 +19,9 @@ use crate::db::usage::DAY_SECONDS;
 use crate::error::AppError;
 
 /// The readable start of a clone token.
-pub const CLONE_PREFIX: &str = "gac_";
+pub const CLONE_PREFIX: &str = "khc_";
 /// The readable start of an API token.
-pub const API_PREFIX: &str = "gaa_";
+pub const API_PREFIX: &str = "kha_";
 const MAX_NAME_CHARS: usize = 100;
 /// The lifetimes a token can have, in days; an empty choice never expires.
 const EXPIRY_DAYS: [i64; 3] = [30, 90, 365];

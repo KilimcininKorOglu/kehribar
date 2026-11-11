@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use axum::http::StatusCode;
 use common::{TestApp, archive_source, git_in, page, source_repo};
-use git_archive::web::search::MAX_MATCHES;
+use kehribar::web::search::MAX_MATCHES;
 
 /// A source with mixed-case text, a binary file, an option-like line and
 /// a file with more matching lines than the page shows. The `old` branch

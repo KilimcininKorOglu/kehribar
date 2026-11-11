@@ -791,7 +791,7 @@ mod tests {
             "main",
             "feature/x",
             "v1.0",
-            "refs/git-archive/rewritten/1/refs/heads/main",
+            "refs/kehribar/rewritten/1/refs/heads/main",
             "0a1b2c",
         ] {
             assert!(valid_rev(ok), "{ok}");
@@ -931,7 +931,7 @@ mod tests {
             (RefKind::Tag, "v1", "bbb", 100)
         );
         let rescued = parse_ref(&record(&[
-            "refs/git-archive/rewritten/5/heads/main",
+            "refs/kehribar/rewritten/5/heads/main",
             "ccc",
             "",
             "0",

@@ -969,9 +969,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().to_string_lossy().into_owned();
         let config = crate::config::Config::from_lookup(|name| match name {
-            "GIT_ARCHIVE_ADMIN_USERNAME" | "GIT_ARCHIVE_ADMIN_PASSWORD" => Some("x".into()),
-            "GIT_ARCHIVE_SECRET_KEY" => Some("00".repeat(32)),
-            "GIT_ARCHIVE_DATA_DIR" => Some(data.clone()),
+            "KEHRIBAR_ADMIN_USERNAME" | "KEHRIBAR_ADMIN_PASSWORD" => Some("x".into()),
+            "KEHRIBAR_SECRET_KEY" => Some("00".repeat(32)),
+            "KEHRIBAR_DATA_DIR" => Some(data.clone()),
             _ => None,
         })
         .unwrap();

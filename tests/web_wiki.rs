@@ -8,7 +8,7 @@ use std::path::Path;
 
 use axum::http::{StatusCode, header};
 use common::{TestApp, archive_source, git_in, page, source_repo};
-use git_archive::git::mirror;
+use kehribar::git::mirror;
 
 /// A wiki with a Markdown home page, AsciiDoc, reStructuredText and
 /// MediaWiki pages, and an image.
@@ -95,13 +95,13 @@ async fn a_wiki_the_source_deletes_stays_in_the_archive() {
     archive_source(&t, &source, true).await;
     std::fs::remove_dir_all(mirror::wiki_url(&source.to_string_lossy(), false)).unwrap();
 
-    git_archive::db::repos::schedule_now(&t.state.pool, 1, git_archive::db::unix_now())
+    kehribar::db::repos::schedule_now(&t.state.pool, 1, kehribar::db::unix_now())
         .await
         .unwrap();
     for handle in t.state.scheduler.tick().await.unwrap() {
         handle.await.unwrap();
     }
-    let repo = git_archive::db::repos::get(&t.state.pool, 1)
+    let repo = kehribar::db::repos::get(&t.state.pool, 1)
         .await
         .unwrap()
         .unwrap();

@@ -2,20 +2,20 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use git_archive::config::{Config, DEFAULT_PORT};
-use git_archive::db::{self, repos};
-use git_archive::i18n::Catalog;
-use git_archive::web::{self, AppState};
+use kehribar::config::{Config, DEFAULT_PORT};
+use kehribar::db::{self, repos};
+use kehribar::i18n::Catalog;
+use kehribar::web::{self, AppState};
 use tracing_subscriber::EnvFilter;
 
-const DATABASE_FILE: &str = "git-archive.db";
+const DATABASE_FILE: &str = "kehribar.db";
 
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("git-archive: {err}");
+            eprintln!("kehribar: {err}");
             ExitCode::FAILURE
         }
     }
@@ -54,14 +54,12 @@ async fn build_state(config: Config) -> Result<AppState, Box<dyn Error>> {
 /// Brings the data directory in line before any sync runs.
 fn tidy_disk(config: &Config) -> Result<(), Box<dyn Error>> {
     // A private key that a killed process left must not stay on the disk.
-    let keys = git_archive::git::ssh::remove_leftovers(&config.tmp_dir())?;
+    let keys = kehribar::git::ssh::remove_leftovers(&config.tmp_dir())?;
     if keys > 0 {
         tracing::info!(keys, "removed SSH key files of an earlier run");
     }
-    let moved = git_archive::git::ssh::split_legacy(
-        &config.legacy_known_hosts(),
-        &config.known_hosts_dir(),
-    )?;
+    let moved =
+        kehribar::git::ssh::split_legacy(&config.legacy_known_hosts(), &config.known_hosts_dir())?;
     if moved > 0 {
         tracing::info!(moved, "moved stored SSH host keys into one file per host");
     }

@@ -58,7 +58,7 @@ pub(super) async fn store_pasted(
 /// host page, to be added to the account on the server.
 pub async fn generate(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, AppError> {
     let host = load_host(&ctx, id).await?;
-    let comment = format!("git-archive@{}", host.host);
+    let comment = format!("kehribar@{}", host.host);
     let pair = ssh::generate(&ctx.state.config.tmp_dir(), &comment)
         .await
         .map_err(AppError::internal)?;
