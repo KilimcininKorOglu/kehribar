@@ -281,6 +281,8 @@ pre,
 
 .stack {
   display: grid;
+  /* A long select option must not widen the form past a narrow screen. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.9rem;
 }
 
@@ -298,6 +300,7 @@ pre,
 
 .field {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.3rem;
   font-weight: 500;
 }
@@ -316,6 +319,7 @@ textarea {
 
 select {
   width: auto;
+  max-width: 100%;
 }
 
 input:focus,
