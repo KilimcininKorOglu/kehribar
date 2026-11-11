@@ -14,6 +14,8 @@ struct Project {
     http_url_to_repo: String,
     /// Present only on forks.
     forked_from_project: Option<IgnoredAny>,
+    #[serde(default)]
+    archived: bool,
 }
 
 pub async fn list(
@@ -35,6 +37,7 @@ pub async fn list(
         .map(|project| RemoteRepo {
             clone_url: project.http_url_to_repo,
             fork: project.forked_from_project.is_some(),
+            archived: project.archived,
         })
         .collect())
 }

@@ -28,6 +28,8 @@ pub struct RemoteRepo {
     /// The HTTP(S) clone URL.
     pub clone_url: String,
     pub fork: bool,
+    /// The provider marks the repository read-only (archived).
+    pub archived: bool,
 }
 
 #[derive(Debug, Error)]

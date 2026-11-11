@@ -2,6 +2,8 @@
 
 use sqlx::{FromRow, SqlitePool};
 
+use crate::name_filter::NameFilter;
+
 text_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
     #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -24,23 +26,43 @@ pub struct Source {
     pub last_scan_at: Option<i64>,
     pub last_error: Option<String>,
     pub created_at: i64,
+    /// Repository name globs, one per line; see [`crate::name_filter`].
+    pub include_patterns: Option<String>,
+    pub exclude_patterns: Option<String>,
+    /// Scans leave out repositories the provider marks as archived.
+    pub skip_archived: bool,
+}
+
+impl Source {
+    pub fn name_filter(&self) -> NameFilter<'_> {
+        NameFilter {
+            include: self.include_patterns.as_deref(),
+            exclude: self.exclude_patterns.as_deref(),
+        }
+    }
+
+    pub fn has_filter(&self) -> bool {
+        self.include_patterns.is_some() || self.exclude_patterns.is_some() || self.skip_archived
+    }
 }
 
 /// The values a source is created with.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NewSource<'a> {
     pub host_id: i64,
     pub kind: SourceKind,
     pub name: &'a str,
-    pub auto_add: bool,
-    pub include_forks: bool,
+    pub options: SourceOptions,
 }
 
 /// The options of a source the user can change later.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct SourceOptions {
     pub auto_add: bool,
     pub include_forks: bool,
+    pub skip_archived: bool,
+    pub include_patterns: Option<String>,
+    pub exclude_patterns: Option<String>,
 }
 
 /// Builds a `SELECT` of every source column at compile time.
@@ -48,7 +70,8 @@ macro_rules! select_sources {
     ($tail:literal) => {
         concat!(
             "SELECT id, host_id, kind, name, auto_add, include_forks, last_scan_at, \
-             last_error, created_at FROM sources ",
+             last_error, created_at, include_patterns, exclude_patterns, skip_archived \
+             FROM sources ",
             $tail
         )
     };
@@ -61,15 +84,20 @@ pub async fn insert(
     source: &NewSource<'_>,
     now: i64,
 ) -> sqlx::Result<Option<i64>> {
+    let options = &source.options;
     sqlx::query_scalar(
-        "INSERT INTO sources (host_id, kind, name, auto_add, include_forks, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
+        "INSERT INTO sources (host_id, kind, name, auto_add, include_forks, skip_archived, \
+         include_patterns, exclude_patterns, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
     )
     .bind(source.host_id)
     .bind(source.kind)
     .bind(source.name)
-    .bind(source.auto_add)
-    .bind(source.include_forks)
+    .bind(options.auto_add)
+    .bind(options.include_forks)
+    .bind(options.skip_archived)
+    .bind(&options.include_patterns)
+    .bind(&options.exclude_patterns)
     .bind(now)
     .fetch_optional(pool)
     .await
@@ -102,14 +130,20 @@ pub async fn due_for_scan(pool: &SqlitePool, before: i64) -> sqlx::Result<Vec<So
 pub async fn update_options(
     pool: &SqlitePool,
     id: i64,
-    options: SourceOptions,
+    options: &SourceOptions,
 ) -> sqlx::Result<bool> {
-    let result = sqlx::query("UPDATE sources SET auto_add = ?, include_forks = ? WHERE id = ?")
-        .bind(options.auto_add)
-        .bind(options.include_forks)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE sources SET auto_add = ?, include_forks = ?, skip_archived = ?, \
+         include_patterns = ?, exclude_patterns = ? WHERE id = ?",
+    )
+    .bind(options.auto_add)
+    .bind(options.include_forks)
+    .bind(options.skip_archived)
+    .bind(&options.include_patterns)
+    .bind(&options.exclude_patterns)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -172,8 +206,10 @@ mod tests {
             host_id,
             kind,
             name,
-            auto_add: true,
-            include_forks: false,
+            options: SourceOptions {
+                auto_add: true,
+                ..SourceOptions::default()
+            },
         }
     }
 
@@ -197,13 +233,19 @@ mod tests {
         assert!(due_for_scan(&pool, 8).await.unwrap().is_empty());
         assert_eq!(due_for_scan(&pool, 9).await.unwrap().len(), 1);
 
+        assert!(!stored.has_filter());
         let options = SourceOptions {
             auto_add: false,
             include_forks: true,
+            skip_archived: true,
+            include_patterns: Some("api-*".into()),
+            exclude_patterns: Some("*-old".into()),
         };
-        assert!(update_options(&pool, id, options).await.unwrap());
+        assert!(update_options(&pool, id, &options).await.unwrap());
         let stored = get(&pool, id).await.unwrap().unwrap();
-        assert!(!stored.auto_add && stored.include_forks);
+        assert!(!stored.auto_add && stored.include_forks && stored.skip_archived);
+        assert!(stored.has_filter());
+        assert!(stored.name_filter().allows("api-x") && !stored.name_filter().allows("api-old"));
         // A source without auto_add is never scanned on schedule.
         assert!(due_for_scan(&pool, 100).await.unwrap().is_empty());
         assert_eq!(list(&pool).await.unwrap().len(), 1);

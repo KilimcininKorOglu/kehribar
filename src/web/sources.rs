@@ -18,6 +18,7 @@ use crate::db::hosts::{self, Host, Provider};
 use crate::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use crate::db::unix_now;
 use crate::error::AppError;
+use crate::name_filter;
 use crate::providers;
 use crate::repo_url;
 
@@ -36,6 +37,9 @@ pub struct SourceFields {
     pub name: String,
     pub auto_add: bool,
     pub include_forks: bool,
+    pub skip_archived: bool,
+    pub include_patterns: String,
+    pub exclude_patterns: String,
 }
 
 impl SourceFields {
@@ -46,6 +50,9 @@ impl SourceFields {
             name: String::new(),
             auto_add: true,
             include_forks: false,
+            skip_archived: false,
+            include_patterns: String::new(),
+            exclude_patterns: String::new(),
         }
     }
 
@@ -54,9 +61,19 @@ impl SourceFields {
             host_id: form.host_id.parse().unwrap_or_default(),
             kind: SourceKind::parse(&form.kind).unwrap_or(SourceKind::Org),
             name: form.name.clone(),
-            auto_add: is_checked(form.auto_add.as_deref()),
-            include_forks: is_checked(form.include_forks.as_deref()),
+            auto_add: is_checked(form.options.auto_add.as_deref()),
+            include_forks: is_checked(form.options.include_forks.as_deref()),
+            skip_archived: is_checked(form.options.skip_archived.as_deref()),
+            include_patterns: form.options.include_patterns.clone().unwrap_or_default(),
+            exclude_patterns: form.options.exclude_patterns.clone().unwrap_or_default(),
         }
+    }
+
+    /// Whether the filter part of the form has a value, so it opens.
+    pub fn has_filter(&self) -> bool {
+        self.skip_archived
+            || !self.include_patterns.trim().is_empty()
+            || !self.exclude_patterns.trim().is_empty()
     }
 
     pub fn kinds(&self) -> [SourceKind; 2] {
@@ -106,8 +123,8 @@ pub struct SourceForm {
     host_id: String,
     kind: String,
     name: String,
-    auto_add: Option<String>,
-    include_forks: Option<String>,
+    #[serde(flatten)]
+    options: OptionsForm,
 }
 
 /// Maps the `notice` query value to a message key, ignoring anything else.
@@ -192,16 +209,19 @@ async fn validate(
 
 pub async fn create(ctx: PageContext, Form(form): Form<SourceForm>) -> Result<Response, AppError> {
     let fields = SourceFields::from_form(&form);
-    let (host, kind, name) = match validate(&ctx, &form).await? {
-        Ok(valid) => valid,
+    let checked = match validate(&ctx, &form).await? {
+        Ok(valid) => form.options.parse().map(|options| (valid, options)),
+        Err(key) => Err(key),
+    };
+    let ((host, kind, name), options) = match checked {
+        Ok(checked) => checked,
         Err(key) => return list_page(&ctx, fields, None, Some(key)).await,
     };
     let new = NewSource {
         host_id: host.id,
         kind,
         name: &name,
-        auto_add: fields.auto_add,
-        include_forks: fields.include_forks,
+        options,
     };
     let Some(id) = sources::insert(&ctx.state.pool, &new, unix_now()).await? else {
         return list_page(&ctx, fields, None, Some("sources.exists")).await;
@@ -229,6 +249,26 @@ pub async fn scan(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, App
 pub struct OptionsForm {
     auto_add: Option<String>,
     include_forks: Option<String>,
+    skip_archived: Option<String>,
+    include_patterns: Option<String>,
+    exclude_patterns: Option<String>,
+}
+
+impl OptionsForm {
+    /// The checked options; the `Err` is the message key to show.
+    fn parse(&self) -> Result<SourceOptions, &'static str> {
+        let patterns = |text: &Option<String>| {
+            name_filter::normalize(text.as_deref().unwrap_or_default())
+                .map_err(|_| "sources.invalid_pattern")
+        };
+        Ok(SourceOptions {
+            auto_add: is_checked(self.auto_add.as_deref()),
+            include_forks: is_checked(self.include_forks.as_deref()),
+            skip_archived: is_checked(self.skip_archived.as_deref()),
+            include_patterns: patterns(&self.include_patterns)?,
+            exclude_patterns: patterns(&self.exclude_patterns)?,
+        })
+    }
 }
 
 pub async fn update(
@@ -236,11 +276,11 @@ pub async fn update(
     Path(id): Path<i64>,
     Form(form): Form<OptionsForm>,
 ) -> Result<Response, AppError> {
-    let options = SourceOptions {
-        auto_add: is_checked(form.auto_add.as_deref()),
-        include_forks: is_checked(form.include_forks.as_deref()),
+    let options = match form.parse() {
+        Ok(options) => options,
+        Err(key) => return list_page(&ctx, SourceFields::blank(), None, Some(key)).await,
     };
-    if !sources::update_options(&ctx.state.pool, id, options).await? {
+    if !sources::update_options(&ctx.state.pool, id, &options).await? {
         return Err(AppError::NotFound);
     }
     Ok(Redirect::to("/sources?notice=saved").into_response())

@@ -185,6 +185,13 @@ invalid_host = "Listeden bir sunucu seçin."
 invalid_kind = "Listeden bir tür seçin."
 invalid_name = "Ad yalnız harf, rakam, '.', '-', '_' ve '~' içerebilir. '/' yalnız GitLab gruplarında kullanılabilir."
 exists = "Bu kaynak zaten ekli."
+filter = "Filtreler"
+skip_archived = "Archived repoları alma"
+skip_archived_help = "Sağlayıcının archived olarak işaretlediği repoları arşive ekleme"
+include_patterns = "Yalnız bu adlardaki repolar"
+exclude_patterns = "Bu adlardaki repolar hariç"
+patterns_help = "Her satıra bir desen yazın. * herhangi bir metne, ? tek bir karaktere uyar, örneğin api-* veya *-old. Desen repo adına uygulanır, büyük-küçük harf fark etmez. Boş liste tüm repoları kapsar, hariç listesi önce gelir. Filtre yalnız yeni eklenecek repoları etkiler, arşivdeki repolar silinmez."
+invalid_pattern = "Desenler yalnız harf, rakam, '.', '-', '_', '~', '*' ve '?' içerebilir."
 
 [refs]
 exclude = "Arşive alınmayacak ref'ler"

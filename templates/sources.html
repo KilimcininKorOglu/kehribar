@@ -54,6 +54,18 @@
             <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
             <label class="check"><input type="checkbox" name="auto_add" value="1"{% if row.source.auto_add %} checked{% endif %}><span>{{ layout.t("sources.auto_add") }}</span></label>
             <label class="check"><input type="checkbox" name="include_forks" value="1"{% if row.source.include_forks %} checked{% endif %}><span>{{ layout.t("sources.include_forks") }}</span></label>
+            <details class="source-filter"{% if row.source.has_filter() %} open{% endif %}>
+              <summary>{{ layout.t("sources.filter") }}</summary>
+              <label class="check"><input type="checkbox" name="skip_archived" value="1"{% if row.source.skip_archived %} checked{% endif %}><span>{{ layout.t("sources.skip_archived") }}</span></label>
+              <label class="field small">
+                <span>{{ layout.t("sources.include_patterns") }}</span>
+                <textarea name="include_patterns" rows="2" spellcheck="false">{% if let Some(p) = row.source.include_patterns %}{{ p }}{% endif %}</textarea>
+              </label>
+              <label class="field small">
+                <span>{{ layout.t("sources.exclude_patterns") }}</span>
+                <textarea name="exclude_patterns" rows="2" spellcheck="false">{% if let Some(p) = row.source.exclude_patterns %}{{ p }}{% endif %}</textarea>
+              </label>
+            </details>
             <button class="btn btn-ghost btn-small" type="submit">{{ layout.t("form.save") }}</button>
           </form>
         </td>
@@ -115,6 +127,22 @@
       <input type="checkbox" name="include_forks" value="1"{% if fields.include_forks %} checked{% endif %}>
       <span>{{ layout.t("sources.include_forks_help") }}</span>
     </label>
+    <details class="stack"{% if fields.has_filter() %} open{% endif %}>
+      <summary>{{ layout.t("sources.filter") }}</summary>
+      <label class="check">
+        <input type="checkbox" name="skip_archived" value="1"{% if fields.skip_archived %} checked{% endif %}>
+        <span>{{ layout.t("sources.skip_archived_help") }}</span>
+      </label>
+      <label class="field">
+        <span>{{ layout.t("sources.include_patterns") }}</span>
+        <textarea name="include_patterns" rows="3" spellcheck="false" placeholder="api-*">{{ fields.include_patterns }}</textarea>
+      </label>
+      <label class="field">
+        <span>{{ layout.t("sources.exclude_patterns") }}</span>
+        <textarea name="exclude_patterns" rows="3" spellcheck="false" placeholder="*-old">{{ fields.exclude_patterns }}</textarea>
+        <small class="muted">{{ layout.t("sources.patterns_help") }}</small>
+      </label>
+    </details>
     <div class="actions">
       <button class="btn btn-primary" type="submit">{{ layout.t("sources.submit") }}</button>
     </div>

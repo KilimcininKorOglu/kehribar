@@ -12,6 +12,8 @@ const LIMIT: usize = 50;
 struct Repo {
     clone_url: String,
     fork: bool,
+    #[serde(default)]
+    archived: bool,
 }
 
 pub async fn list(
@@ -30,6 +32,7 @@ pub async fn list(
         .map(|repo| RemoteRepo {
             clone_url: repo.clone_url,
             fork: repo.fork,
+            archived: repo.archived,
         })
         .collect())
 }

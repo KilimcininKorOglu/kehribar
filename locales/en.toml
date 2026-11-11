@@ -185,6 +185,13 @@ invalid_host = "Select a host from the list."
 invalid_kind = "Select a type from the list."
 invalid_name = "Enter a name with letters, digits, '.', '-', '_' or '~'. Only a GitLab group can contain '/'."
 exists = "This source is already in the list."
+filter = "Filters"
+skip_archived = "Skip archived repositories"
+skip_archived_help = "Do not import repositories the provider marks as archived"
+include_patterns = "Only repositories with these names"
+exclude_patterns = "Except repositories with these names"
+patterns_help = "One pattern per line. * matches any text and ? one character, for example api-* or *-old. A pattern applies to the repository name and ignores case. An empty list covers every repository; the except list wins. Filters affect only new imports; archived repositories stay."
+invalid_pattern = "Patterns can contain only letters, digits, '.', '-', '_', '~', '*' and '?'."
 
 [refs]
 exclude = "Refs to leave out"

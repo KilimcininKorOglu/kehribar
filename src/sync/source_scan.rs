@@ -18,6 +18,8 @@ pub struct ScanReport {
     /// Repositories the provider listed, forks included.
     pub listed: usize,
     pub added: usize,
+    /// Listed repositories the fork, archived or name options left out.
+    pub filtered: usize,
     /// The error stored on the source, `None` after a clean scan.
     pub error: Option<String>,
 }
@@ -33,7 +35,12 @@ pub async fn scan(ctx: &SyncContext, source: &Source) -> sqlx::Result<ScanReport
     sources::mark_scanned(&ctx.pool, source.id, started, report.error.as_deref()).await?;
     match &report.error {
         Some(err) => tracing::warn!(source = %source.name, %err, "source scan failed"),
-        None => tracing::info!(source = %source.name, added = report.added, "source scanned"),
+        None => tracing::info!(
+            source = %source.name,
+            added = report.added,
+            filtered = report.filtered,
+            "source scanned"
+        ),
     }
     report_change(ctx, source, report.error.as_deref()).await;
     Ok(report)
@@ -77,10 +84,11 @@ async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Res
         ..ScanReport::default()
     };
     let mut foreign = Vec::new();
-    for remote in listed.iter().filter(|r| source.include_forks || !r.fork) {
+    for remote in &listed {
         match add(ctx, source, host, remote).await? {
             Added::Yes => report.added += 1,
             Added::Exists => {}
+            Added::Filtered => report.filtered += 1,
             Added::Foreign => foreign.push(remote.clone_url.as_str()),
         }
     }
@@ -99,8 +107,17 @@ async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Res
 enum Added {
     Yes,
     Exists,
+    /// The source options leave the repository out.
+    Filtered,
     /// The clone URL is invalid or on another host.
     Foreign,
+}
+
+/// Whether the fork, archived and name options of `source` let `name` in.
+fn accepts(source: &Source, remote: &RemoteRepo, name: &str) -> bool {
+    (source.include_forks || !remote.fork)
+        && !(source.skip_archived && remote.archived)
+        && source.name_filter().allows(name)
 }
 
 async fn add(
@@ -113,6 +130,9 @@ async fn add(
         Ok(location) if location.host.eq_ignore_ascii_case(&host.host) => location,
         _ => return Ok(Added::Foreign),
     };
+    if !accepts(source, remote, &location.name) {
+        return Ok(Added::Filtered);
+    }
     let repo = NewRepo {
         url: &location.url,
         host: &location.host,

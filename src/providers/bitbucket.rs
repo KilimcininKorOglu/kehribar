@@ -56,6 +56,8 @@ fn remote(repo: Repo) -> Option<RemoteRepo> {
     Some(RemoteRepo {
         clone_url: url.to_string(),
         fork: repo.parent.is_some(),
+        // Bitbucket Cloud has no archived state.
+        archived: false,
     })
 }
 
@@ -97,6 +99,7 @@ mod tests {
             Some(RemoteRepo {
                 clone_url: "https://bitbucket.org/team/app.git".into(),
                 fork: false,
+                archived: false,
             })
         );
     }

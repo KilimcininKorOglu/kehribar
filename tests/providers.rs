@@ -137,6 +137,7 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
         let mut p = json!({ "http_url_to_repo": format!("https://git.example/grp/sub/p{n}.git") });
         if n == 1 {
             p["forked_from_project"] = json!({ "id": 9 });
+            p["archived"] = json!(true);
         }
         p
     };
@@ -159,11 +160,13 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
         [
             RemoteRepo {
                 clone_url: "https://git.example/grp/sub/p0.git".into(),
-                fork: false
+                fork: false,
+                archived: false,
             },
             RemoteRepo {
                 clone_url: "https://git.example/grp/sub/p1.git".into(),
-                fork: true
+                fork: true,
+                archived: true,
             },
         ]
     );

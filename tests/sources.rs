@@ -11,7 +11,7 @@ use axum::http::{StatusCode, header};
 use common::{TestApp, body_text, header_value};
 use git_archive::db::hosts::{self, HostInput, Provider};
 use git_archive::db::repos;
-use git_archive::db::sources::{self, NewSource, Source, SourceKind};
+use git_archive::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use git_archive::db::unix_now;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
@@ -44,13 +44,24 @@ fn repo(url: &str, fork: bool) -> Value {
     json!({ "clone_url": url, "fork": fork })
 }
 
+fn options(include_forks: bool) -> SourceOptions {
+    SourceOptions {
+        auto_add: true,
+        include_forks,
+        ..SourceOptions::default()
+    }
+}
+
 async fn add_source(t: &TestApp, host_id: i64, include_forks: bool) -> Source {
+    add_source_with(t, host_id, options(include_forks)).await
+}
+
+async fn add_source_with(t: &TestApp, host_id: i64, options: SourceOptions) -> Source {
     let new = NewSource {
         host_id,
         kind: SourceKind::Org,
         name: "octo",
-        auto_add: true,
-        include_forks,
+        options,
     };
     let id = sources::insert(&t.state.pool, &new, unix_now())
         .await
@@ -100,11 +111,7 @@ async fn scan_adds_new_repositories_and_never_removes_any() {
     assert_eq!(added.source_id, Some(source.id));
     assert!(added.wiki_enabled);
 
-    let options = sources::SourceOptions {
-        auto_add: true,
-        include_forks: true,
-    };
-    sources::update_options(&t.state.pool, source.id, options)
+    sources::update_options(&t.state.pool, source.id, &options(true))
         .await
         .unwrap();
     scan(&t, source.id).await;
@@ -124,6 +131,123 @@ async fn scan_adds_new_repositories_and_never_removes_any() {
     .await;
     scan(&t, source.id).await;
     assert_eq!(archived_urls(&t).await.len(), 3);
+}
+
+#[tokio::test]
+async fn name_and_archived_filters_decide_what_a_scan_adds() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source_with(
+        &t,
+        host_id,
+        SourceOptions {
+            auto_add: true,
+            include_forks: false,
+            skip_archived: true,
+            include_patterns: Some("api-*\ntool".into()),
+            exclude_patterns: Some("*-old".into()),
+        },
+    )
+    .await;
+    let archived = json!({ "clone_url": "https://github.com/octo/api-frozen.git", "fork": false, "archived": true });
+    list_answers(
+        &server,
+        json!([
+            repo("https://github.com/octo/API-core.git", false),
+            repo("https://github.com/octo/api-old.git", false),
+            repo("https://github.com/octo/tool.git", false),
+            repo("https://github.com/octo/docs.git", false),
+            archived
+        ]),
+    )
+    .await;
+    let report = t.state.scheduler.context().clone();
+    let scanned = git_archive::sync::source_scan::scan(&report, &source)
+        .await
+        .unwrap();
+    assert_eq!((scanned.listed, scanned.added, scanned.filtered), (5, 2, 3));
+    assert_eq!(scanned.error, None);
+    assert_eq!(
+        archived_urls(&t).await,
+        [
+            "https://github.com/octo/API-core.git",
+            "https://github.com/octo/tool.git"
+        ]
+    );
+
+    // Filters only decide new imports: cleared filters add the rest, and a
+    // later, stricter filter removes nothing.
+    sources::update_options(&t.state.pool, source.id, &options(false))
+        .await
+        .unwrap();
+    scan(&t, source.id).await;
+    assert_eq!(archived_urls(&t).await.len(), 5);
+    let strict = SourceOptions {
+        exclude_patterns: Some("*".into()),
+        ..options(false)
+    };
+    sources::update_options(&t.state.pool, source.id, &strict)
+        .await
+        .unwrap();
+    scan(&t, source.id).await;
+    assert_eq!(archived_urls(&t).await.len(), 5);
+}
+
+#[tokio::test]
+async fn the_sources_page_saves_filters_and_rejects_bad_patterns() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    list_answers(&server, json!([])).await;
+    let form = format!(
+        "host_id={host_id}&kind=org&name=octo&auto_add=1&skip_archived=1\
+         &include_patterns=api-*%0D%0A%0D%0Aapi-*&exclude_patterns=*-old"
+    );
+    let response = t.post("/sources", &form).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let source = wait_for_scan(&t).await;
+    assert!(source.skip_archived);
+    assert_eq!(source.include_patterns.as_deref(), Some("api-*"));
+    assert_eq!(source.exclude_patterns.as_deref(), Some("*-old"));
+    let page = body_text(t.get("/sources").await).await;
+    assert!(
+        page.contains("<details class=\"source-filter\" open>"),
+        "{page}"
+    );
+
+    let bad = t
+        .post(
+            &format!("/sources/{}", source.id),
+            "auto_add=1&include_patterns=a%2Fb",
+        )
+        .await;
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_text(bad).await.contains("Desenler yalnız harf"));
+    let kept = sources::get(&t.state.pool, source.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.include_patterns.as_deref(), Some("api-*"));
+
+    let cleared = t
+        .post(&format!("/sources/{}", source.id), "auto_add=1")
+        .await;
+    assert_eq!(cleared.status(), StatusCode::SEE_OTHER);
+    let cleared = sources::get(&t.state.pool, source.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!cleared.has_filter());
+
+    let bad_new = t
+        .post(
+            "/sources",
+            &format!("host_id={host_id}&kind=user&name=x&exclude_patterns=%3Cb%3E"),
+        )
+        .await;
+    assert_eq!(bad_new.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(sources::list(&t.state.pool).await.unwrap().len(), 1);
 }
 
 #[tokio::test]

@@ -148,12 +148,12 @@ fn path_segments(url: &Url) -> Result<Vec<&str>, UrlError> {
 /// A segment becomes a directory name, so it must not climb out of the
 /// archive or carry encoded characters.
 fn is_safe_segment(segment: &str) -> bool {
-    !segment.is_empty()
-        && segment != "."
-        && segment != ".."
-        && segment
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~'))
+    !segment.is_empty() && segment != "." && segment != ".." && segment.bytes().all(is_name_byte)
+}
+
+/// A byte that a path segment of a repository URL may hold.
+pub fn is_name_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~')
 }
 
 /// `<data dir>/repos/<host>/<owner>/<name>.git`. The parts come from
