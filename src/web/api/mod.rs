@@ -10,13 +10,15 @@ mod views;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use axum::extract::{ConnectInfo, FromRequestParts, Path, Request, State};
+use axum::extract::{ConnectInfo, FromRequest, FromRequestParts, Path, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer};
 use serde_json::json;
 
 use super::AppState;
@@ -25,6 +27,7 @@ use super::tokens::API_PREFIX;
 use crate::db::tokens::{self, AccessToken, TokenKind};
 use crate::db::unix_now;
 use crate::error::AppError;
+use crate::i18n::{Lang, Tr};
 
 /// An error answer: `{"error": {"code": ..., "message": ...}}`.
 #[derive(Debug)]
@@ -50,6 +53,13 @@ impl ApiError {
     /// A request whose values are wrong; `code` names the problem.
     pub fn invalid(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+    }
+
+    /// A request the web forms would refuse with the message `key`: the
+    /// key is the code and its English text the message.
+    pub fn refused(state: &AppState, status: StatusCode, key: &'static str) -> Self {
+        let message = Tr::new(state.catalog.clone(), Lang::En).t(key).to_owned();
+        Self::new(status, key, message)
     }
 
     fn internal(err: impl std::fmt::Display) -> Self {
@@ -117,6 +127,33 @@ impl<S: Send + Sync> FromRequestParts<S> for Id {
     }
 }
 
+/// A JSON request body; a body that does not parse is answered in the
+/// API's error shape with the status of the rejection.
+pub struct JsonBody<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> ApiResult<Self> {
+        Json::<T>::from_request(request, state)
+            .await
+            .map(|Json(value)| Self(value))
+            .map_err(|rejection| {
+                ApiError::new(rejection.status(), "invalid_body", rejection.body_text())
+            })
+    }
+}
+
+/// Reads a field that may be `null`: an absent field stays `None`, `null`
+/// is `Some(None)`. Use it with `#[serde(default)]`.
+pub fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 /// The API token of a `Bearer` header value, if it looks like one.
 fn bearer(value: Option<&HeaderValue>) -> Option<&str> {
     let token = value?.to_str().ok()?.strip_prefix("Bearer ")?.trim();
@@ -182,9 +219,14 @@ async fn unknown_route() -> ApiError {
 /// The routes under `/api/v1`.
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
-        .route("/repos", get(repos::list))
-        .route("/repos/{id}", get(repos::show))
+        .route("/repos", get(repos::list).post(repos::create))
+        .route(
+            "/repos/{id}",
+            get(repos::show).patch(repos::update).delete(repos::delete),
+        )
         .route("/repos/{id}/runs", get(repos::runs))
+        .route("/repos/{id}/credentials", put(repos::credentials))
+        .route("/repos/{id}/sync", post(repos::sync))
         .route("/hosts", get(hosts::list))
         .route("/hosts/{id}", get(hosts::show))
         .route("/sources", get(sources::list))

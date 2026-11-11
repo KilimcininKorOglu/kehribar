@@ -4,28 +4,17 @@
 
 mod common;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
-use common::{TestApp, add_repo, auth_request, body_text, create_token, header_value, send};
+use axum::http::{StatusCode, header};
+use common::{TestApp, add_repo, api_call, api_request, create_token, header_value, send};
 use git_archive::db::hosts::{self, HostInput, Provider};
 use git_archive::db::sources::{self, NewSource, SourceKind, SourceOptions};
 use git_archive::db::{repos, sync_runs, unix_now};
 use git_archive::web::auth::MAX_FAILED_LOGINS;
 use serde_json::Value;
 
-/// A request to the API with `token` as the Bearer token.
-fn api_request(method: &str, path: &str, token: Option<&str>) -> Request<Body> {
-    let auth = token.map(|token| format!("Bearer {token}"));
-    auth_request(method, &format!("/api/v1{path}"), auth.as_deref())
-}
-
-/// The status and the JSON body of an API answer.
+/// The status and the JSON body of a request without a body.
 async fn call(t: &TestApp, method: &str, path: &str, token: Option<&str>) -> (StatusCode, Value) {
-    let response = send(&t.app, api_request(method, path, token)).await;
-    let status = response.status();
-    let text = body_text(response).await;
-    let json = serde_json::from_str(&text).unwrap_or_else(|_| panic!("JSON: {text}"));
-    (status, json)
+    api_call(t, method, path, token, None).await
 }
 
 async fn get(t: &TestApp, path: &str, token: &str) -> Value {
@@ -43,7 +32,7 @@ async fn requests_need_a_valid_api_token() {
     let t = TestApp::new().await;
     let reader = read_token(&t).await;
 
-    let response = send(&t.app, api_request("GET", "/repos", None)).await;
+    let response = send(&t.app, api_request("GET", "/repos", None, None)).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(header_value(&response, header::WWW_AUTHENTICATE), "Bearer");
     let (status, json) = call(&t, "GET", "/repos", None).await;

@@ -236,6 +236,47 @@ pub fn auth_request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body
     request.body(Body::empty()).unwrap()
 }
 
+/// A request to the REST API with `token` as its Bearer token and `body`
+/// as its JSON body.
+pub fn api_request(
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&serde_json::Value>,
+) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(format!("/api/v1{path}"));
+    if let Some(token) = token {
+        request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    match body {
+        None => request.body(Body::empty()),
+        Some(body) => request
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string())),
+    }
+    .unwrap()
+}
+
+/// The status and the JSON body of an API answer; an empty body is `null`.
+pub async fn api_call(
+    t: &TestApp,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    let response = send(&t.app, api_request(method, path, token, body)).await;
+    let status = response.status();
+    let text = body_text(response).await;
+    if text.is_empty() {
+        return (status, serde_json::Value::Null);
+    }
+    let json = serde_json::from_str(&text).unwrap_or_else(|_| panic!("JSON: {text}"));
+    (status, json)
+}
+
 /// `text` encoded as one value of a form body.
 pub fn urlencode(text: &str) -> String {
     url::form_urlencoded::byte_serialize(text.as_bytes()).collect()

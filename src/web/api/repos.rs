@@ -2,13 +2,21 @@
 
 use axum::Json;
 use axum::extract::{Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use super::views::{RepoView, RunView};
-use super::{ApiError, ApiResult, Id, found};
+use super::{ApiError, ApiResult, Id, JsonBody, found, present};
 use crate::db::repos::{self, ListFilter, RepoSort, RepoStatus};
 use crate::db::sync_runs::{self, KEEP_PER_REPO};
 use crate::web::AppState;
+use crate::web::form::{encrypt_token, optional_text};
+use crate::web::repos::{
+    AddSettings, Added, SettingsInput, add_repo, check_settings, queue_sync, remove_repo,
+    save_credentials,
+};
 
 /// Repositories per page when the request names no `per_page`.
 const DEFAULT_PER_PAGE: i64 = 50;
@@ -122,10 +130,170 @@ pub async fn list(
     }))
 }
 
-/// `GET /repos/{id}`.
-pub async fn show(State(state): State<AppState>, Id(id): Id) -> ApiResult<Json<RepoView>> {
+/// The repository `id` as it is stored now.
+async fn view(state: &AppState, id: i64) -> ApiResult<Json<RepoView>> {
     let repo = found(repos::get(&state.pool, id).await?)?;
     Ok(Json(repo.into()))
+}
+
+/// `GET /repos/{id}`.
+pub async fn show(State(state): State<AppState>, Id(id): Id) -> ApiResult<Json<RepoView>> {
+    view(&state, id).await
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewRepoBody {
+    url: String,
+    #[serde(default)]
+    interval_minutes: Option<i64>,
+    #[serde(default = "yes")]
+    wiki_enabled: bool,
+    #[serde(default)]
+    lfs_enabled: bool,
+    #[serde(default)]
+    ref_exclude: Vec<String>,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// `POST /repos`: adds a repository, due for an immediate sync.
+pub async fn create(
+    State(state): State<AppState>,
+    JsonBody(body): JsonBody<NewRepoBody>,
+) -> ApiResult<impl IntoResponse> {
+    let patterns = body.ref_exclude.join("\n");
+    let settings = check_settings(&SettingsInput {
+        interval_minutes: body.interval_minutes,
+        wiki_enabled: body.wiki_enabled,
+        lfs_enabled: body.lfs_enabled,
+        ref_exclude: &patterns,
+    })
+    .map_err(|key| ApiError::refused(&state, StatusCode::UNPROCESSABLE_ENTITY, key))?;
+    let token_enc = encrypt_token(&state.cipher, body.token.as_deref())?;
+    let add = AddSettings {
+        interval: body.interval_minutes,
+        wiki: body.wiki_enabled,
+        username: optional_text(body.username.as_deref()),
+        token_enc: token_enc.as_deref(),
+    };
+    let id = match add_repo(&state, &body.url, &add).await? {
+        Added::Yes(id) => id,
+        Added::Exists => {
+            return Err(ApiError::refused(
+                &state,
+                StatusCode::CONFLICT,
+                "repo_new.exists",
+            ));
+        }
+        Added::Invalid(key) => {
+            return Err(ApiError::refused(
+                &state,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                key,
+            ));
+        }
+    };
+    repos::update_settings(&state.pool, id, settings.as_settings()).await?;
+    state.scheduler.wake();
+    let location = [(header::LOCATION, format!("/api/v1/repos/{id}"))];
+    Ok((StatusCode::CREATED, location, view(&state, id).await?))
+}
+
+/// A change of some settings; a field that is absent keeps its value.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsPatch {
+    /// `null` returns to the default interval.
+    #[serde(default, deserialize_with = "present")]
+    interval_minutes: Option<Option<i64>>,
+    wiki_enabled: Option<bool>,
+    lfs_enabled: Option<bool>,
+    ref_exclude: Option<Vec<String>>,
+}
+
+/// `PATCH /repos/{id}`: changes the sync settings.
+pub async fn update(
+    State(state): State<AppState>,
+    Id(id): Id,
+    JsonBody(patch): JsonBody<SettingsPatch>,
+) -> ApiResult<Json<RepoView>> {
+    let repo = found(repos::get(&state.pool, id).await?)?;
+    let patterns = match patch.ref_exclude {
+        Some(lines) => lines.join("\n"),
+        None => repo.ref_exclude.unwrap_or_default(),
+    };
+    let settings = check_settings(&SettingsInput {
+        interval_minutes: patch.interval_minutes.unwrap_or(repo.interval_minutes),
+        wiki_enabled: patch.wiki_enabled.unwrap_or(repo.wiki_enabled),
+        lfs_enabled: patch.lfs_enabled.unwrap_or(repo.lfs_enabled),
+        ref_exclude: &patterns,
+    })
+    .map_err(|key| ApiError::refused(&state, StatusCode::UNPROCESSABLE_ENTITY, key))?;
+    repos::update_settings(&state.pool, id, settings.as_settings()).await?;
+    view(&state, id).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialsBody {
+    #[serde(default)]
+    username: Option<String>,
+    /// Absent keeps the stored token; `null` or blank removes it.
+    #[serde(default, deserialize_with = "present")]
+    token: Option<Option<String>>,
+}
+
+/// `PUT /repos/{id}/credentials`: the username and the token of the source.
+/// The answer tells only whether a token is stored.
+pub async fn credentials(
+    State(state): State<AppState>,
+    Id(id): Id,
+    JsonBody(body): JsonBody<CredentialsBody>,
+) -> ApiResult<Json<RepoView>> {
+    found(repos::get(&state.pool, id).await?)?;
+    let clear = matches!(&body.token, Some(token) if optional_text(token.as_deref()).is_none());
+    let token = body.token.flatten();
+    save_credentials(
+        &state,
+        id,
+        body.username.as_deref(),
+        token.as_deref(),
+        clear,
+    )
+    .await?;
+    view(&state, id).await
+}
+
+/// `DELETE /repos/{id}`: removes the repository with its archive. A
+/// repository that is syncing now is refused.
+pub async fn delete(State(state): State<AppState>, Id(id): Id) -> ApiResult<StatusCode> {
+    let repo = found(repos::get(&state.pool, id).await?)?;
+    if repo.status == RepoStatus::Syncing {
+        return Err(ApiError::refused(
+            &state,
+            StatusCode::CONFLICT,
+            "repo.delete_busy",
+        ));
+    }
+    remove_repo(&state, &repo).await?;
+    tracing::info!(url = %repo.url, "repository deleted with its archive through the API");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /repos/{id}/sync`: syncs now, or once more after the running sync.
+pub async fn sync(State(state): State<AppState>, Id(id): Id) -> ApiResult<impl IntoResponse> {
+    if !queue_sync(&state, id).await? {
+        return Err(ApiError::not_found());
+    }
+    let body: Value = json!({ "queued": true });
+    Ok((StatusCode::ACCEPTED, Json(body)))
 }
 
 #[derive(Debug, Deserialize)]
