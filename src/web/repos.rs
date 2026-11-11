@@ -402,15 +402,15 @@ pub enum Added {
 }
 
 /// The settings a new repository gets besides its URL.
-struct AddSettings<'a> {
-    interval: Option<i64>,
-    wiki: bool,
-    username: Option<&'a str>,
-    token_enc: Option<&'a [u8]>,
+pub(super) struct AddSettings<'a> {
+    pub interval: Option<i64>,
+    pub wiki: bool,
+    pub username: Option<&'a str>,
+    pub token_enc: Option<&'a [u8]>,
 }
 
 /// Adds the repository at `url` to the archive, due for an immediate sync.
-async fn add_repo(
+pub(super) async fn add_repo(
     state: &AppState,
     url: &str,
     settings: &AddSettings<'_>,
@@ -728,15 +728,69 @@ pub async fn show(
     Ok(render(&page)?.into_response())
 }
 
+/// Makes the repository due now and wakes the scheduler; `false` when there
+/// is no such repository.
+pub(super) async fn queue_sync(state: &AppState, id: i64) -> Result<bool, AppError> {
+    if !repos::schedule_now(&state.pool, id, unix_now()).await? {
+        return Ok(false);
+    }
+    state.scheduler.wake();
+    Ok(true)
+}
+
 pub async fn sync_now(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
-    if !repos::schedule_now(&state.pool, id, unix_now()).await? {
+    if !queue_sync(&state, id).await? {
         return Err(AppError::NotFound);
     }
-    state.scheduler.wake();
     Ok(Redirect::to(&format!("/repos/{id}?notice=queued")).into_response())
+}
+
+/// The settings of a repository as the page or the API sends them.
+pub(crate) struct SettingsInput<'a> {
+    pub interval_minutes: Option<i64>,
+    pub wiki_enabled: bool,
+    pub lfs_enabled: bool,
+    /// One ref pattern per line.
+    pub ref_exclude: &'a str,
+}
+
+/// Settings that passed [`check_settings`].
+pub(crate) struct CheckedSettings {
+    interval_minutes: Option<i64>,
+    wiki_enabled: bool,
+    lfs_enabled: bool,
+    ref_exclude: Option<String>,
+}
+
+impl CheckedSettings {
+    pub(crate) fn as_settings(&self) -> RepoSettings<'_> {
+        RepoSettings {
+            interval_minutes: self.interval_minutes,
+            wiki_enabled: self.wiki_enabled,
+            ref_exclude: self.ref_exclude.as_deref(),
+            lfs_enabled: self.lfs_enabled,
+        }
+    }
+}
+
+/// Checks repository settings; the error is the message key of the problem.
+pub(crate) fn check_settings(input: &SettingsInput<'_>) -> Result<CheckedSettings, &'static str> {
+    if input
+        .interval_minutes
+        .is_some_and(|minutes| !INTERVAL_RANGE.contains(&minutes))
+    {
+        return Err("form.interval_invalid");
+    }
+    let ref_exclude = ref_filter::normalize(input.ref_exclude).map_err(|_| "refs.invalid")?;
+    Ok(CheckedSettings {
+        interval_minutes: input.interval_minutes,
+        wiki_enabled: input.wiki_enabled,
+        lfs_enabled: input.lfs_enabled,
+        ref_exclude,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -770,17 +824,36 @@ pub async fn update(
     let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {
         return settings_error(&ctx, repo, &form, "form.interval_invalid").await;
     };
-    let Ok(ref_exclude) = ref_filter::normalize(form.ref_exclude.as_deref().unwrap_or("")) else {
-        return settings_error(&ctx, repo, &form, "refs.invalid").await;
-    };
-    let settings = RepoSettings {
+    let input = SettingsInput {
         interval_minutes: interval,
         wiki_enabled: is_checked(form.wiki.as_deref()),
-        ref_exclude: ref_exclude.as_deref(),
         lfs_enabled: is_checked(form.lfs.as_deref()),
+        ref_exclude: form.ref_exclude.as_deref().unwrap_or(""),
     };
-    repos::update_settings(&ctx.state.pool, id, settings).await?;
+    let settings = match check_settings(&input) {
+        Ok(settings) => settings,
+        Err(key) => return settings_error(&ctx, repo, &form, key).await,
+    };
+    repos::update_settings(&ctx.state.pool, id, settings.as_settings()).await?;
     Ok(Redirect::to(&format!("/repos/{id}?notice=saved")).into_response())
+}
+
+/// Sets the username, and the token when `token` is not blank. Without a
+/// new token, `clear` removes the stored one.
+pub(super) async fn save_credentials(
+    state: &AppState,
+    id: i64,
+    username: Option<&str>,
+    token: Option<&str>,
+    clear: bool,
+) -> Result<(), AppError> {
+    let token_enc = encrypt_token(&state.cipher, token)?;
+    let username = optional_text(username);
+    repos::update_credentials(&state.pool, id, username, token_enc.as_deref()).await?;
+    if token_enc.is_none() && clear {
+        repos::clear_token(&state.pool, id).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -796,13 +869,16 @@ pub async fn update_credentials(
     Form(form): Form<CredentialsForm>,
 ) -> Result<Response, AppError> {
     load_repo(&ctx.state, id).await?;
-    let token_enc = encrypt_token(&ctx.state.cipher, form.token.as_deref())?;
-    let username = optional_text(form.username.as_deref());
-    repos::update_credentials(&ctx.state.pool, id, username, token_enc.as_deref()).await?;
     // A new token wins over the clear box.
-    if token_enc.is_none() && is_checked(form.clear_token.as_deref()) {
-        repos::clear_token(&ctx.state.pool, id).await?;
-    }
+    let clear = is_checked(form.clear_token.as_deref());
+    save_credentials(
+        &ctx.state,
+        id,
+        form.username.as_deref(),
+        form.token.as_deref(),
+        clear,
+    )
+    .await?;
     Ok(Redirect::to(&format!("/repos/{id}?notice=credentials")).into_response())
 }
 
@@ -837,7 +913,7 @@ pub async fn delete(
 
 /// Deletes the record of a repository, its archive with the wiki, and the
 /// stored images that no repository uses any more.
-async fn remove_repo(state: &AppState, repo: &Repo) -> Result<(), AppError> {
+pub(super) async fn remove_repo(state: &AppState, repo: &Repo) -> Result<(), AppError> {
     let dir = repo_url::archive_dir(&state.config.data_dir, &repo.host, &repo.owner, &repo.name);
     repos::delete(&state.pool, repo.id).await?;
     remove_dir(&mirror::wiki_dir(&dir)).await?;

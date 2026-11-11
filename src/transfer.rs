@@ -13,12 +13,13 @@ use thiserror::Error;
 
 use crate::crypto::Cipher;
 use crate::db::hosts::{self, Host, HostInput, ImportedHost, Provider};
-use crate::db::repos::{self, NewRepo, Repo, RepoSettings};
+use crate::db::repos::{self, NewRepo, Repo};
 use crate::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use crate::db::unix_now;
 use crate::repo_url::{self, GIST_HOST, RepoLocation};
-use crate::settings::{CONCURRENCY_RANGE, INTERVAL_RANGE};
+use crate::settings::CONCURRENCY_RANGE;
 use crate::web::form::optional_text;
+use crate::web::repos::{CheckedSettings, SettingsInput, check_settings};
 use crate::{name_filter, providers, ref_filter};
 
 /// The version of the file layout. An import refuses any other version.
@@ -446,17 +447,15 @@ async fn import_source(
 }
 
 /// Applies the checks of the add form and the repository settings.
-fn check_repo(entry: &RepoEntry) -> Result<(RepoLocation, Option<String>), &'static str> {
+fn check_repo(entry: &RepoEntry) -> Result<(RepoLocation, CheckedSettings), &'static str> {
     let location = repo_url::parse(&entry.url).map_err(|err| err.message_key())?;
-    if entry
-        .interval_minutes
-        .is_some_and(|minutes| !INTERVAL_RANGE.contains(&minutes))
-    {
-        return Err("form.interval_invalid");
-    }
-    let ref_exclude = ref_filter::normalize(text(entry.ref_exclude.as_ref()).unwrap_or(""))
-        .map_err(|_| "refs.invalid")?;
-    Ok((location, ref_exclude))
+    let settings = check_settings(&SettingsInput {
+        interval_minutes: entry.interval_minutes,
+        wiki_enabled: entry.wiki_enabled,
+        lfs_enabled: entry.lfs_enabled,
+        ref_exclude: text(entry.ref_exclude.as_ref()).unwrap_or(""),
+    })?;
+    Ok((location, settings))
 }
 
 /// The id of the source the entry names; `None` when it is not in the archive.
@@ -484,7 +483,7 @@ async fn import_repo(
         name: entry.url.clone(),
         outcome,
     };
-    let (location, ref_exclude) = match check_repo(entry) {
+    let (location, settings) = match check_repo(entry) {
         Ok(checked) => checked,
         Err(key) => return Ok(row(Outcome::Invalid(key))),
     };
@@ -504,12 +503,6 @@ async fn import_repo(
     let Some(id) = repos::insert(&mut *conn, &repo, now).await? else {
         return Ok(row(Outcome::Exists));
     };
-    let settings = RepoSettings {
-        interval_minutes: entry.interval_minutes,
-        wiki_enabled: entry.wiki_enabled,
-        ref_exclude: ref_exclude.as_deref(),
-        lfs_enabled: entry.lfs_enabled,
-    };
-    repos::update_settings(conn, id, settings).await?;
+    repos::update_settings(conn, id, settings.as_settings()).await?;
     Ok(row(added(token.dropped)))
 }
