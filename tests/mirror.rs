@@ -273,6 +273,25 @@ async fn two_rewrites_in_the_same_second_keep_both_old_commits() {
 }
 
 #[tokio::test]
+async fn a_kept_ref_below_the_name_moves_the_rescue_to_the_next_second() {
+    let mut source = Source::new();
+    let first = source.commit("one");
+    source.sync(100).await;
+    // An earlier sync of the same second kept `heads/main/old` already.
+    let below = format!("{REWRITTEN_REF_PREFIX}500/heads/main/old");
+    git_in(&source.archive, &["update-ref", &below, &first]);
+
+    source.git(&["commit", "--quiet", "--amend", "--allow-empty", "-m", "two"]);
+    assert_eq!(source.sync(500).await.refs_rescued, 1);
+    let refs = source.archive_refs();
+    assert_eq!(
+        refs[&format!("{REWRITTEN_REF_PREFIX}501/heads/main")],
+        first
+    );
+    assert_eq!(refs[&below], first);
+}
+
+#[tokio::test]
 async fn moved_tag_is_kept() {
     let mut source = Source::new();
     let first = source.commit("one");

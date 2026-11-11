@@ -206,7 +206,14 @@ async fn set_aside_blocking(
     Ok(set_aside)
 }
 
-/// Whether `name` and a source ref lie one inside the other, such as
+/// The names and ids of `refs` as borrowed strings, for [`blocks`].
+fn as_names(refs: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
+    refs.iter()
+        .map(|(name, id)| (name.as_str(), id.as_str()))
+        .collect()
+}
+
+/// Whether `name` and one of `fetched` lie one inside the other, such as
 /// `refs/heads/a` and `refs/heads/a/b`.
 fn blocks(name: &str, fetched: &BTreeMap<&str, &str>) -> bool {
     let below = format!("{name}/");
@@ -493,14 +500,17 @@ async fn classify_changes(
 const RESCUE_NAME_TRIES: i64 = 60;
 
 /// Keeps `old_id`, the commit a rewritten ref pointed to. A name that holds
-/// another commit is never overwritten; the next second's name is used.
+/// another commit, or that lies inside or above a kept ref of the same
+/// second, is never used; the next second's name is.
 async fn rescue(git: &Git, dir: &Path, name: &str, old_id: &str, now: i64) -> Result<(), GitError> {
     let short = name.strip_prefix("refs/").unwrap_or(name);
     for at in now..now + RESCUE_NAME_TRIES {
         let rescue = format!("{REWRITTEN_REF_PREFIX}{at}/{short}");
-        match ref_ids(git, dir, Some(&rescue)).await?.remove(&rescue) {
+        let kept = ref_ids(git, dir, Some(&format!("{REWRITTEN_REF_PREFIX}{at}"))).await?;
+        match kept.get(&rescue) {
             Some(id) if id == old_id => return Ok(()),
             Some(_) => continue,
+            None if blocks(&rescue, &as_names(&kept)) => continue,
             None => {}
         }
         // The empty old value makes the update fail if the ref exists.
