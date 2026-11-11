@@ -13,6 +13,7 @@ const LIMIT: usize = 50;
 #[derive(Deserialize)]
 struct Repo {
     clone_url: String,
+    ssh_url: Option<String>,
     fork: bool,
     #[serde(default)]
     archived: bool,
@@ -34,6 +35,7 @@ pub async fn list(
         .into_iter()
         .map(|repo| RemoteRepo {
             clone_url: repo.clone_url,
+            ssh_url: repo.ssh_url,
             fork: repo.fork,
             archived: repo.archived,
         })

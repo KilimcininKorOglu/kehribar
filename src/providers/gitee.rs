@@ -16,6 +16,7 @@ const PER_PAGE: usize = 100;
 struct Repo {
     /// The HTTPS clone URL, `https://gitee.com/<owner>/<name>.git`.
     html_url: String,
+    ssh_url: Option<String>,
     fork: bool,
 }
 
@@ -35,6 +36,7 @@ pub async fn list(
         .into_iter()
         .map(|repo| RemoteRepo {
             clone_url: repo.html_url,
+            ssh_url: repo.ssh_url,
             fork: repo.fork,
             // Gitee API v5 has no archived state.
             archived: false,

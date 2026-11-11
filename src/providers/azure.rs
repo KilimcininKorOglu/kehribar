@@ -18,6 +18,7 @@ struct List {
 #[serde(rename_all = "camelCase")]
 struct Repo {
     remote_url: String,
+    ssh_url: Option<String>,
     #[serde(default)]
     is_fork: bool,
     /// A disabled repository cannot be fetched.
@@ -49,6 +50,7 @@ fn remote(repo: Repo) -> Option<RemoteRepo> {
     url.set_username("").ok()?;
     Some(RemoteRepo {
         clone_url: url.to_string(),
+        ssh_url: repo.ssh_url,
         fork: repo.is_fork,
         // Azure DevOps has no archived state; disabled ones are left out.
         archived: false,
@@ -63,6 +65,7 @@ mod tests {
     fn clone_urls_lose_the_organization_username() {
         let repo = Repo {
             remote_url: "https://fabrikam@dev.azure.com/fabrikam/Fiber/_git/App".into(),
+            ssh_url: Some("git@ssh.dev.azure.com:v3/fabrikam/Fiber/App".into()),
             is_fork: true,
             is_disabled: false,
         };
@@ -70,6 +73,7 @@ mod tests {
             remote(repo),
             Some(RemoteRepo {
                 clone_url: "https://dev.azure.com/fabrikam/Fiber/_git/App".into(),
+                ssh_url: Some("git@ssh.dev.azure.com:v3/fabrikam/Fiber/App".into()),
                 fork: true,
                 archived: false,
             })

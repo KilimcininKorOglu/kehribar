@@ -10,7 +10,7 @@ use crate::db::sources::{self, Source};
 use crate::db::unix_now;
 use crate::notify::{self, Change, Event};
 use crate::providers::{self, ProviderError, RemoteRepo};
-use crate::repo_url;
+use crate::repo_url::{self, RepoLocation};
 
 /// What one scan did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -104,29 +104,41 @@ async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Res
         ..ScanReport::default()
     };
     let mut foreign = Vec::new();
+    let mut no_ssh = Vec::new();
     for remote in &listed {
         match add(ctx, source, host, remote).await? {
             Added::Yes => report.added += 1,
             Added::Exists => {}
             Added::Filtered => report.filtered += 1,
             Added::Foreign => foreign.push(remote.clone_url.as_str()),
+            Added::NoSsh => no_ssh.push(remote.clone_url.as_str()),
         }
     }
-    if !foreign.is_empty() {
-        // Shown on the sources page, so a wrong API URL does not lose repositories unnoticed.
-        let noun = if foreign.len() == 1 {
-            "repository"
-        } else {
-            "repositories"
-        };
-        report.error = Some(format!(
-            "{} {noun} skipped, the clone URL is not on {}: {}",
-            foreign.len(),
-            host.host,
-            foreign.join(", ")
-        ));
+    // Shown on the sources page, so a wrong API URL or a missing SSH URL
+    // does not lose repositories unnoticed.
+    let reasons = [
+        skipped(&foreign, &format!("the clone URL is not on {}", host.host)),
+        skipped(&no_ssh, &format!("no SSH URL on {}", host.host)),
+    ];
+    let messages: Vec<String> = reasons.into_iter().flatten().collect();
+    if !messages.is_empty() {
+        report.error = Some(messages.join("; "));
     }
     Ok(report)
+}
+
+/// `N repositories skipped, <reason>: <urls>`, or `None` for no URL.
+fn skipped(urls: &[&str], reason: &str) -> Option<String> {
+    let noun = match urls.len() {
+        0 => return None,
+        1 => "repository",
+        _ => "repositories",
+    };
+    Some(format!(
+        "{} {noun} skipped, {reason}: {}",
+        urls.len(),
+        urls.join(", ")
+    ))
 }
 
 enum Added {
@@ -136,6 +148,23 @@ enum Added {
     Filtered,
     /// The clone URL is invalid or on another host.
     Foreign,
+    /// The source asks for SSH, but the provider names no SSH URL on the
+    /// same server.
+    NoSsh,
+}
+
+/// The URL a scanned repository is fetched from: the HTTPS clone URL, or
+/// with `use_ssh` the SSH URL the provider names. That URL must be on the
+/// same server, or on its `ssh.` name as Azure DevOps uses, because the
+/// SSH key of the host goes to it.
+fn fetch_url(source: &Source, remote: &RemoteRepo, https: &RepoLocation) -> Option<String> {
+    if !source.use_ssh {
+        return Some(https.url.clone());
+    }
+    let ssh = repo_url::parse(remote.ssh_url.as_deref()?).ok()?;
+    let server = https.host.split(':').next().unwrap_or_default();
+    let same_server = ssh.host == server || ssh.host == format!("ssh.{server}");
+    (repo_url::is_ssh(&ssh.url) && same_server).then_some(ssh.url)
 }
 
 /// Whether the fork, archived and name options of `source` let `name` in.
@@ -163,8 +192,11 @@ async fn add(
     if !accepts(source, remote, &location.name) {
         return Ok(Added::Filtered);
     }
+    let Some(url) = fetch_url(source, remote, &location) else {
+        return Ok(Added::NoSsh);
+    };
     let repo = NewRepo {
-        url: &location.url,
+        url: &url,
         host: &location.host,
         owner: &location.owner,
         name: &location.name,
@@ -179,4 +211,64 @@ async fn add(
         Some(_) => Added::Yes,
         None => Added::Exists,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::sources::SourceKind;
+
+    fn source(use_ssh: bool) -> Source {
+        Source {
+            id: 1,
+            host_id: 1,
+            kind: SourceKind::Org,
+            name: "o".into(),
+            auto_add: true,
+            include_forks: false,
+            last_scan_at: None,
+            last_error: None,
+            created_at: 0,
+            include_patterns: None,
+            exclude_patterns: None,
+            skip_archived: false,
+            use_ssh,
+        }
+    }
+
+    fn remote(https: &str, ssh: Option<&str>) -> (RemoteRepo, RepoLocation) {
+        let remote = RemoteRepo {
+            clone_url: https.into(),
+            ssh_url: ssh.map(Into::into),
+            fork: false,
+            archived: false,
+        };
+        let location = repo_url::parse(https).unwrap();
+        (remote, location)
+    }
+
+    #[test]
+    fn ssh_urls_must_stay_on_the_server_of_the_host() {
+        let url = |use_ssh, https, ssh| {
+            let (remote, location) = remote(https, ssh);
+            fetch_url(&source(use_ssh), &remote, &location)
+        };
+        let azure = "https://dev.azure.com/org/proj/_git/app";
+        let azure_ssh = Some("git@ssh.dev.azure.com:v3/org/proj/app");
+        assert_eq!(url(false, azure, azure_ssh).as_deref(), Some(azure));
+        assert_eq!(url(true, azure, azure_ssh).as_deref(), azure_ssh);
+        // The port of the HTTP server does not count; SSH has its own.
+        assert_eq!(
+            url(
+                true,
+                "http://gitea.local:3000/o/r.git",
+                Some("ssh://git@gitea.local:2222/o/r.git")
+            )
+            .as_deref(),
+            Some("ssh://git@gitea.local:2222/o/r.git")
+        );
+        assert_eq!(url(true, azure, None), None);
+        assert_eq!(url(true, azure, Some("git@evil.example:o/r.git")), None);
+        assert_eq!(url(true, azure, Some("https://dev.azure.com/o/r")), None);
+    }
 }

@@ -36,6 +36,8 @@ pub const RATE_LIMIT_WAIT_SECONDS: i64 = 15 * 60;
 pub struct RemoteRepo {
     /// The HTTP(S) clone URL.
     pub clone_url: String,
+    /// The SSH clone URL, when the provider names one.
+    pub ssh_url: Option<String>,
     pub fork: bool,
     /// The provider marks the repository read-only (archived).
     pub archived: bool,

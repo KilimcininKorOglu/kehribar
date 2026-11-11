@@ -48,13 +48,21 @@ pub async fn list(api: &Api, workspace: &str) -> Result<Vec<RemoteRepo>, Provide
     Err(ProviderError::TooManyPages)
 }
 
-/// The HTTPS clone link without the account name Bitbucket puts in it.
+/// The HTTPS clone link without the account name Bitbucket puts in it,
+/// and the SSH clone link.
 fn remote(repo: Repo) -> Option<RemoteRepo> {
-    let link = repo.links.clone.into_iter().find(|l| l.name == "https")?;
-    let mut url = Url::parse(&link.href).ok()?;
+    let link = |name: &str| {
+        repo.links
+            .clone
+            .iter()
+            .find(|l| l.name == name)
+            .map(|l| l.href.clone())
+    };
+    let mut url = Url::parse(&link("https")?).ok()?;
     url.set_username("").ok()?;
     Some(RemoteRepo {
         clone_url: url.to_string(),
+        ssh_url: link("ssh"),
         fork: repo.parent.is_some(),
         // Bitbucket Cloud has no archived state.
         archived: false,
@@ -98,6 +106,7 @@ mod tests {
             remote(repo),
             Some(RemoteRepo {
                 clone_url: "https://bitbucket.org/team/app.git".into(),
+                ssh_url: Some("git@bitbucket.org:team/app.git".into()),
                 fork: false,
                 archived: false,
             })

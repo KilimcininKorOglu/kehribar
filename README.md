@@ -174,6 +174,8 @@ Each host can hold one SSH key. On the host page, generate a new ed25519 key or 
 
 The first connection to a server stores its host key in `/data/ssh/known_hosts`. When the server later shows another key, the fetch stops and the repository changes to "Error" with a message that names the host key. The host page lists the stored host keys of the host on every port. When a change is expected, for example after a server move, "Forget host keys" removes them and the next fetch stores the new key.
 
+A source with the "SSH URL" option adds its repositories with the SSH clone URL the provider names, under the same archive path as the HTTPS URL. The SSH URL must be on the server of the host or on its `ssh.` name, as Azure DevOps uses (`ssh.dev.azure.com`), because the SSH key of the host goes to that server. A repository without such a URL, for example a gist, is skipped and named in the scan result.
+
 ## Importing users and organizations
 
 On the Sources page, choose a host, the type (user or organization), and the name as it appears in URLs. The first scan runs at once and adds every repository it finds. With "add new repositories" on, the source is scanned again on the global interval. "Also import forks" includes forked repositories.

@@ -50,6 +50,7 @@ struct Repo {
 pub async fn list(api: &Api, name: &str) -> Result<Vec<RemoteRepo>, ProviderError> {
     let username = name.trim_start_matches('~');
     let origin = api.base.origin().ascii_serialization();
+    let ssh_host = api.base.host_str().unwrap_or_default();
     let mut repos = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
@@ -64,6 +65,11 @@ pub async fn list(api: &Api, name: &str) -> Result<Vec<RemoteRepo>, ProviderErro
                 .into_iter()
                 .map(|repo| RemoteRepo {
                     clone_url: format!("{origin}/{}/{}", user.canonical_name, repo.name),
+                    // git.sr.ht serves SSH on the host of its web pages.
+                    ssh_url: Some(format!(
+                        "git@{ssh_host}:{}/{}",
+                        user.canonical_name, repo.name
+                    )),
                     // SourceHut has neither forks nor an archived state.
                     fork: false,
                     archived: false,

@@ -281,6 +281,9 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
     let server = MockServer::start().await;
     let project = |n: usize| {
         let mut p = json!({ "http_url_to_repo": format!("https://git.example/grp/sub/p{n}.git") });
+        if n == 0 {
+            p["ssh_url_to_repo"] = json!("git@git.example:grp/sub/p0.git");
+        }
         if n == 1 {
             p["forked_from_project"] = json!({ "id": 9 });
             p["archived"] = json!(true);
@@ -306,11 +309,13 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
         [
             RemoteRepo {
                 clone_url: "https://git.example/grp/sub/p0.git".into(),
+                ssh_url: Some("git@git.example:grp/sub/p0.git".into()),
                 fork: false,
                 archived: false,
             },
             RemoteRepo {
                 clone_url: "https://git.example/grp/sub/p1.git".into(),
+                ssh_url: None,
                 fork: true,
                 archived: true,
             },
@@ -512,7 +517,7 @@ async fn azure_lists_a_project_with_basic_auth_and_skips_disabled_repositories()
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "count": 3,
             "value": [
-                { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/App", "isFork": false },
+                { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/App", "sshUrl": "git@ssh.dev.example:v3/fabrikam/Fiber/App", "isFork": false },
                 { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/Copy", "isFork": true },
                 { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/Old", "isDisabled": true }
             ]
@@ -530,11 +535,13 @@ async fn azure_lists_a_project_with_basic_auth_and_skips_disabled_repositories()
         [
             RemoteRepo {
                 clone_url: "https://dev.example/fabrikam/Fiber/_git/App".into(),
+                ssh_url: Some("git@ssh.dev.example:v3/fabrikam/Fiber/App".into()),
                 fork: false,
                 archived: false,
             },
             RemoteRepo {
                 clone_url: "https://dev.example/fabrikam/Fiber/_git/Copy".into(),
+                ssh_url: None,
                 fork: true,
                 archived: false,
             },

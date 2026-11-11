@@ -134,6 +134,63 @@ async fn scan_adds_new_repositories_and_never_removes_any() {
 }
 
 #[tokio::test]
+async fn an_ssh_source_adds_the_ssh_url_under_the_https_archive_path() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    let host_id = github_host(&t, &server).await;
+    let source = add_source_with(
+        &t,
+        host_id,
+        SourceOptions {
+            auto_add: true,
+            use_ssh: true,
+            ..SourceOptions::default()
+        },
+    )
+    .await;
+    let with_ssh = |name: &str, ssh: &str| json!({ "clone_url": format!("https://github.com/octo/{name}.git"), "ssh_url": ssh, "fork": false });
+    list_answers(
+        &server,
+        json!([
+            with_ssh("app", "git@github.com:octo/app.git"),
+            with_ssh("moved", "git@elsewhere.example:octo/moved.git"),
+            repo("https://github.com/octo/plain.git", false)
+        ]),
+    )
+    .await;
+    let scanned = scan(&t, source.id).await;
+    let added = repos::list(&t.state.pool, None).await.unwrap();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].url, "git@github.com:octo/app.git");
+    assert_eq!(
+        (
+            added[0].host.as_str(),
+            added[0].owner.as_str(),
+            added[0].name.as_str()
+        ),
+        ("github.com", "octo", "app")
+    );
+    // The SSH key of the host never goes to another server.
+    let error = scanned.last_error.unwrap();
+    assert!(
+        error.starts_with("2 repositories skipped, no SSH URL on github.com: "),
+        "{error}"
+    );
+    assert!(error.contains("https://github.com/octo/plain.git"));
+
+    // The page shows and saves the option.
+    let page = body_text(t.get("/sources").await).await;
+    assert!(page.contains("name=\"use_ssh\" value=\"1\" checked"));
+    t.post(&format!("/sources/{}", source.id), "auto_add=1")
+        .await;
+    let saved = sources::get(&t.state.pool, source.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!saved.use_ssh);
+}
+
+#[tokio::test]
 async fn name_and_archived_filters_decide_what_a_scan_adds() {
     let t = TestApp::new().await;
     let server = MockServer::start().await;
@@ -147,6 +204,7 @@ async fn name_and_archived_filters_decide_what_a_scan_adds() {
             skip_archived: true,
             include_patterns: Some("api-*\ntool".into()),
             exclude_patterns: Some("*-old".into()),
+            use_ssh: false,
         },
     )
     .await;

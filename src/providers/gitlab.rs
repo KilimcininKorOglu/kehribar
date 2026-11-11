@@ -13,6 +13,7 @@ const PER_PAGE: usize = 100;
 #[derive(Deserialize)]
 struct Project {
     http_url_to_repo: String,
+    ssh_url_to_repo: Option<String>,
     /// Present only on forks.
     forked_from_project: Option<IgnoredAny>,
     #[serde(default)]
@@ -39,6 +40,7 @@ pub async fn list(
         .into_iter()
         .map(|project| RemoteRepo {
             clone_url: project.http_url_to_repo,
+            ssh_url: project.ssh_url_to_repo,
             fork: project.forked_from_project.is_some(),
             archived: project.archived,
         })

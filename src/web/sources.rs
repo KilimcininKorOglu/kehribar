@@ -40,6 +40,7 @@ pub struct SourceFields {
     pub skip_archived: bool,
     pub include_patterns: String,
     pub exclude_patterns: String,
+    pub use_ssh: bool,
 }
 
 impl SourceFields {
@@ -53,6 +54,7 @@ impl SourceFields {
             skip_archived: false,
             include_patterns: String::new(),
             exclude_patterns: String::new(),
+            use_ssh: false,
         }
     }
 
@@ -66,6 +68,7 @@ impl SourceFields {
             skip_archived: is_checked(form.options.skip_archived.as_deref()),
             include_patterns: form.options.include_patterns.clone().unwrap_or_default(),
             exclude_patterns: form.options.exclude_patterns.clone().unwrap_or_default(),
+            use_ssh: is_checked(form.options.use_ssh.as_deref()),
         }
     }
 
@@ -258,6 +261,7 @@ pub struct OptionsForm {
     skip_archived: Option<String>,
     include_patterns: Option<String>,
     exclude_patterns: Option<String>,
+    use_ssh: Option<String>,
 }
 
 impl OptionsForm {
@@ -273,6 +277,7 @@ impl OptionsForm {
             skip_archived: is_checked(self.skip_archived.as_deref()),
             include_patterns: patterns(&self.include_patterns)?,
             exclude_patterns: patterns(&self.exclude_patterns)?,
+            use_ssh: is_checked(self.use_ssh.as_deref()),
         })
     }
 }

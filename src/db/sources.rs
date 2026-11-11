@@ -35,6 +35,8 @@ pub struct Source {
     pub exclude_patterns: Option<String>,
     /// Scans leave out repositories the provider marks as archived.
     pub skip_archived: bool,
+    /// Scans add the SSH clone URL instead of the HTTPS one.
+    pub use_ssh: bool,
 }
 
 impl Source {
@@ -67,6 +69,7 @@ pub struct SourceOptions {
     pub skip_archived: bool,
     pub include_patterns: Option<String>,
     pub exclude_patterns: Option<String>,
+    pub use_ssh: bool,
 }
 
 /// Builds a `SELECT` of every source column at compile time.
@@ -74,8 +77,8 @@ macro_rules! select_sources {
     ($tail:literal) => {
         concat!(
             "SELECT id, host_id, kind, name, auto_add, include_forks, last_scan_at, \
-             last_error, created_at, include_patterns, exclude_patterns, skip_archived \
-             FROM sources ",
+             last_error, created_at, include_patterns, exclude_patterns, skip_archived, \
+             use_ssh FROM sources ",
             $tail
         )
     };
@@ -91,8 +94,8 @@ pub async fn insert(
     let options = &source.options;
     sqlx::query_scalar(
         "INSERT INTO sources (host_id, kind, name, auto_add, include_forks, skip_archived, \
-         include_patterns, exclude_patterns, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
+         include_patterns, exclude_patterns, use_ssh, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
     )
     .bind(source.host_id)
     .bind(source.kind)
@@ -102,6 +105,7 @@ pub async fn insert(
     .bind(options.skip_archived)
     .bind(&options.include_patterns)
     .bind(&options.exclude_patterns)
+    .bind(options.use_ssh)
     .bind(now)
     .fetch_optional(pool)
     .await
@@ -138,13 +142,14 @@ pub async fn update_options(
 ) -> sqlx::Result<bool> {
     let result = sqlx::query(
         "UPDATE sources SET auto_add = ?, include_forks = ?, skip_archived = ?, \
-         include_patterns = ?, exclude_patterns = ? WHERE id = ?",
+         include_patterns = ?, exclude_patterns = ?, use_ssh = ? WHERE id = ?",
     )
     .bind(options.auto_add)
     .bind(options.include_forks)
     .bind(options.skip_archived)
     .bind(&options.include_patterns)
     .bind(&options.exclude_patterns)
+    .bind(options.use_ssh)
     .bind(id)
     .execute(pool)
     .await?;
@@ -244,10 +249,13 @@ mod tests {
             skip_archived: true,
             include_patterns: Some("api-*".into()),
             exclude_patterns: Some("*-old".into()),
+            use_ssh: true,
         };
+        assert!(!stored.use_ssh);
         assert!(update_options(&pool, id, &options).await.unwrap());
         let stored = get(&pool, id).await.unwrap().unwrap();
         assert!(!stored.auto_add && stored.include_forks && stored.skip_archived);
+        assert!(stored.use_ssh);
         assert!(stored.has_filter());
         assert!(stored.name_filter().allows("api-x") && !stored.name_filter().allows("api-old"));
         // A source without auto_add is never scanned on schedule.

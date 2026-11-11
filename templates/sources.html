@@ -54,6 +54,7 @@
             <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
             <label class="check"><input type="checkbox" name="auto_add" value="1"{% if row.source.auto_add %} checked{% endif %}><span>{{ layout.t("sources.auto_add") }}</span></label>
             <label class="check"><input type="checkbox" name="include_forks" value="1"{% if row.source.include_forks %} checked{% endif %}><span>{{ layout.t("sources.include_forks") }}</span></label>
+            <label class="check"><input type="checkbox" name="use_ssh" value="1"{% if row.source.use_ssh %} checked{% endif %}><span>{{ layout.t("sources.use_ssh") }}</span></label>
             <details class="source-filter"{% if row.source.has_filter() %} open{% endif %}>
               <summary>{{ layout.t("sources.filter") }}</summary>
               <label class="check"><input type="checkbox" name="skip_archived" value="1"{% if row.source.skip_archived %} checked{% endif %}><span>{{ layout.t("sources.skip_archived") }}</span></label>
@@ -126,6 +127,10 @@
     <label class="check">
       <input type="checkbox" name="include_forks" value="1"{% if fields.include_forks %} checked{% endif %}>
       <span>{{ layout.t("sources.include_forks_help") }}</span>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="use_ssh" value="1"{% if fields.use_ssh %} checked{% endif %}>
+      <span>{{ layout.t("sources.use_ssh_help") }}</span>
     </label>
     <details class="stack"{% if fields.has_filter() %} open{% endif %}>
       <summary>{{ layout.t("sources.filter") }}</summary>

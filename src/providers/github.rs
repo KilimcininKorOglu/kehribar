@@ -14,6 +14,7 @@ const PER_PAGE: usize = 100;
 #[derive(Deserialize)]
 struct Repo {
     clone_url: String,
+    ssh_url: Option<String>,
     fork: bool,
     #[serde(default)]
     archived: bool,
@@ -46,6 +47,7 @@ pub async fn list(
         .into_iter()
         .map(|repo| RemoteRepo {
             clone_url: repo.clone_url,
+            ssh_url: repo.ssh_url,
             fork: repo.fork,
             archived: repo.archived,
         })
@@ -57,6 +59,8 @@ fn gist_repo(gist: Gist) -> Option<RemoteRepo> {
     let owner = gist.owner?;
     Some(RemoteRepo {
         clone_url: format!("https://{GIST_HOST}/{}/{}", owner.login, gist.id),
+        // The gist API names only the HTTPS clone URL.
+        ssh_url: None,
         fork: false,
         archived: false,
     })
