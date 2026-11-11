@@ -138,6 +138,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             ref_exclude: None,
+            max_concurrency: None,
         }
     }
 

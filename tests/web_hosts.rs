@@ -234,6 +234,48 @@ async fn ref_patterns_are_stored_for_hosts_and_repositories() {
 }
 
 #[tokio::test]
+async fn the_host_sync_limit_is_stored_and_checked() {
+    let t = TestApp::new().await;
+    let saved = t
+        .post("/hosts", &format!("{HOST_FORM}&max_concurrency=2"))
+        .await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.max_concurrency, Some(2));
+    assert!(
+        body_text(t.get("/hosts/1").await)
+            .await
+            .contains("name=\"max_concurrency\" type=\"number\" min=\"1\" max=\"32\" inputmode=\"numeric\" value=\"2\"")
+    );
+
+    for bad in ["0", "33", "two"] {
+        let response = t
+            .post(
+                "/hosts/1",
+                &format!("host=github.com&provider=github&max_concurrency={bad}"),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        assert!(
+            body_text(response)
+                .await
+                .contains("1 ile 32 arasında bir sayı girin")
+        );
+    }
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.max_concurrency, Some(2));
+
+    // An empty field removes the limit.
+    t.post(
+        "/hosts/1",
+        "host=github.com&provider=github&max_concurrency=",
+    )
+    .await;
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.max_concurrency, None);
+}
+
+#[tokio::test]
 async fn interval_settings_do_not_touch_the_credentials() {
     let t = TestApp::new().await;
     t.post(

@@ -13,6 +13,7 @@ use super::repos::{NoticeQuery, PageContext};
 use crate::db::hosts::{self, Host, HostInput, Provider};
 use crate::db::unix_now;
 use crate::error::AppError;
+use crate::settings::CONCURRENCY_RANGE;
 use crate::{ref_filter, repo_url};
 
 /// The values of the shared form (`host_form.html`) and where it posts to.
@@ -28,6 +29,8 @@ pub struct HostFields {
     pub username: String,
     /// Ref patterns, one per line.
     pub ref_exclude: String,
+    /// Syncs at once on this host; empty for no own limit.
+    pub max_concurrency: String,
 }
 
 impl HostFields {
@@ -41,6 +44,7 @@ impl HostFields {
             api_base_url: String::new(),
             username: String::new(),
             ref_exclude: String::new(),
+            max_concurrency: String::new(),
         }
     }
 
@@ -54,6 +58,10 @@ impl HostFields {
             api_base_url: host.api_base_url.clone().unwrap_or_default(),
             username: host.username.clone().unwrap_or_default(),
             ref_exclude: host.ref_exclude.clone().unwrap_or_default(),
+            max_concurrency: host
+                .max_concurrency
+                .map(|limit| limit.to_string())
+                .unwrap_or_default(),
         }
     }
 
@@ -65,6 +73,7 @@ impl HostFields {
             api_base_url: form.api_base_url.clone().unwrap_or_default(),
             username: form.username.clone().unwrap_or_default(),
             ref_exclude: form.ref_exclude.clone().unwrap_or_default(),
+            max_concurrency: form.max_concurrency.clone().unwrap_or_default(),
             ..self
         }
     }
@@ -106,6 +115,7 @@ pub struct HostForm {
     token: Option<String>,
     clear_token: Option<String>,
     ref_exclude: Option<String>,
+    max_concurrency: Option<String>,
 }
 
 /// A form that passed validation, with the values to store.
@@ -116,6 +126,19 @@ struct ValidHost {
     username: Option<String>,
     token_enc: Option<Vec<u8>>,
     ref_exclude: Option<String>,
+    max_concurrency: Option<i64>,
+}
+
+/// An empty field gives `None`; a number must lie in the range of the
+/// global concurrency setting.
+fn parse_limit(input: Option<&str>) -> Result<Option<i64>, &'static str> {
+    let Some(text) = optional_text(input) else {
+        return Ok(None);
+    };
+    match text.parse() {
+        Ok(limit) if CONCURRENCY_RANGE.contains(&limit) => Ok(Some(limit)),
+        _ => Err("hosts.invalid_concurrency"),
+    }
 }
 
 impl ValidHost {
@@ -127,6 +150,13 @@ impl ValidHost {
             username: self.username.as_deref(),
             token_enc: self.token_enc.as_deref(),
         }
+    }
+
+    /// Stores the values that [`HostInput`] does not carry.
+    async fn save_extras(&self, pool: &sqlx::SqlitePool, id: i64) -> sqlx::Result<()> {
+        hosts::set_ref_exclude(pool, id, self.ref_exclude.as_deref()).await?;
+        hosts::set_max_concurrency(pool, id, self.max_concurrency).await?;
+        Ok(())
     }
 }
 
@@ -148,7 +178,12 @@ fn validate(
     let Ok(ref_exclude) = ref_filter::normalize(form.ref_exclude.as_deref().unwrap_or("")) else {
         return Ok(Err("refs.invalid"));
     };
+    let max_concurrency = match parse_limit(form.max_concurrency.as_deref()) {
+        Ok(limit) => limit,
+        Err(key) => return Ok(Err(key)),
+    };
     Ok(Ok(ValidHost {
+        max_concurrency,
         host,
         provider,
         api_base_url,
@@ -221,7 +256,7 @@ pub async fn create(ctx: PageContext, Form(form): Form<HostForm>) -> Result<Resp
         }
         Err(err) => return Err(err.into()),
     };
-    hosts::set_ref_exclude(&ctx.state.pool, id, valid.ref_exclude.as_deref()).await?;
+    valid.save_extras(&ctx.state.pool, id).await?;
     tracing::info!(host = %valid.host, "host added");
     Ok(Redirect::to("/hosts?notice=saved").into_response())
 }
@@ -272,7 +307,7 @@ pub async fn update(
         }
         Err(err) => return Err(err.into()),
     }
-    hosts::set_ref_exclude(&ctx.state.pool, id, valid.ref_exclude.as_deref()).await?;
+    valid.save_extras(&ctx.state.pool, id).await?;
     // A new token wins over the clear box.
     if valid.token_enc.is_none() && is_checked(form.clear_token.as_deref()) {
         hosts::clear_token(&ctx.state.pool, id).await?;

@@ -22,6 +22,7 @@ fn host(provider: Provider, api: String) -> Host {
         created_at: 0,
         updated_at: 0,
         ref_exclude: None,
+        max_concurrency: None,
     }
 }
 

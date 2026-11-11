@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use git_archive::crypto::Cipher;
+use git_archive::db::hosts::{self, HostInput, Provider};
 use git_archive::db::repos::{self, NewRepo, RepoStatus};
 use git_archive::db::{self, sync_runs, unix_now};
 use git_archive::settings::{self, Overrides};
@@ -132,6 +133,62 @@ async fn concurrency_limits_the_syncs_started_at_once() {
         handle.await.unwrap();
     }
     assert_eq!(s.scheduler.running(), 0);
+    assert_eq!(run_tick(&s.scheduler).await, 1);
+}
+
+#[tokio::test]
+async fn a_host_limit_holds_its_repositories_but_not_the_others() {
+    let s = setup().await;
+    let input = HostInput {
+        host: "slow.example",
+        provider: Provider::Generic,
+        api_base_url: None,
+        username: None,
+        token_enc: None,
+    };
+    let host_id = hosts::insert(&s.ctx.pool, &input, unix_now())
+        .await
+        .unwrap();
+    hosts::set_max_concurrency(&s.ctx.pool, host_id, Some(1))
+        .await
+        .unwrap();
+    // Two repositories on the limited host first, then one elsewhere.
+    for (host, name) in [("slow.example", "a"), ("SLOW.example", "b"), ("local", "c")] {
+        let source = common::source_repo(s.dir.path(), name);
+        let url = source.to_string_lossy();
+        let repo = NewRepo {
+            url: &url,
+            host,
+            owner: "team",
+            name,
+            source_id: None,
+            username: None,
+            token_enc: None,
+            interval_minutes: None,
+            wiki_enabled: false,
+        };
+        repos::insert(&s.ctx.pool, &repo, unix_now()).await.unwrap();
+    }
+
+    let first = s.scheduler.tick().await.unwrap();
+    // One of the limited host and the other host's one; the global limit is 2.
+    assert_eq!(first.len(), 2);
+    assert_eq!(s.scheduler.running_on("slow.example"), 1);
+    assert_eq!(s.scheduler.running_on("local"), 1);
+    let waiting: Vec<_> = repos::list(&s.ctx.pool, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.status == RepoStatus::Pending)
+        .map(|r| r.name)
+        .collect();
+    // Equal due times leave open which of the two limited ones waits.
+    assert!(waiting == ["a"] || waiting == ["b"], "{waiting:?}");
+    for handle in first {
+        handle.await.unwrap();
+    }
+    assert_eq!(s.scheduler.running_on("slow.example"), 0);
+    // The freed slot lets the held repository start.
     assert_eq!(run_tick(&s.scheduler).await, 1);
 }
 

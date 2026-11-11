@@ -112,7 +112,9 @@ mod tests {
         .await
         .unwrap();
 
-        migrate(&pool, 7..=7).await;
+        // The rebuild and every later migration, so the queries below find
+        // the columns they read.
+        migrate(&pool, 7..=i64::MAX).await;
         let link: Option<i64> = sqlx::query_scalar("SELECT source_id FROM repos WHERE id = 9")
             .fetch_one(&pool)
             .await

@@ -29,6 +29,9 @@ pub struct Host {
     pub updated_at: i64,
     /// Ref patterns left out of the fetches of every repository on this host.
     pub ref_exclude: Option<String>,
+    /// Syncs that may run at once against this host; `None` leaves only the
+    /// global concurrency setting.
+    pub max_concurrency: Option<i64>,
 }
 
 /// Values written when a host is created or edited.
@@ -46,7 +49,7 @@ macro_rules! select_hosts {
     ($tail:literal) => {
         concat!(
             "SELECT id, host, provider, api_base_url, username, token_enc, created_at, updated_at, \
-             ref_exclude FROM hosts ",
+             ref_exclude, max_concurrency FROM hosts ",
             $tail
         )
     };
@@ -99,6 +102,20 @@ pub async fn set_ref_exclude(
 ) -> sqlx::Result<bool> {
     let result = sqlx::query("UPDATE hosts SET ref_exclude = ? WHERE id = ?")
         .bind(patterns)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Stores the per-host sync limit; `None` removes it.
+pub async fn set_max_concurrency(
+    pool: &SqlitePool,
+    id: i64,
+    limit: Option<i64>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query("UPDATE hosts SET max_concurrency = ? WHERE id = ?")
+        .bind(limit)
         .bind(id)
         .execute(pool)
         .await?;
@@ -193,6 +210,13 @@ mod tests {
         assert!(update(&pool, id, &edit, 30).await.unwrap());
         let host = get(&pool, id).await.unwrap().unwrap();
         assert_eq!(host.ref_exclude.as_deref(), Some("refs/pull/*"));
+
+        assert_eq!(host.max_concurrency, None);
+        assert!(set_max_concurrency(&pool, id, Some(2)).await.unwrap());
+        assert!(update(&pool, id, &edit, 40).await.unwrap());
+        let host = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(host.max_concurrency, Some(2));
+        assert!(set_max_concurrency(&pool, id, Some(0)).await.is_err());
 
         assert_eq!(list(&pool).await.unwrap().len(), 1);
         assert!(delete(&pool, id).await.unwrap());
