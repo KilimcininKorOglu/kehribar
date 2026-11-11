@@ -35,6 +35,8 @@ pub enum UrlError {
     Path,
     #[error("a gist URL must name its owner: https://gist.github.com/<user>/<id>")]
     GistOwner,
+    #[error("a wiki is archived with its repository, not on its own")]
+    Wiki,
 }
 
 impl UrlError {
@@ -48,6 +50,7 @@ impl UrlError {
             Self::QueryOrFragment => "url.query",
             Self::Path => "url.path",
             Self::GistOwner => "url.gist_owner",
+            Self::Wiki => "url.wiki",
         }
     }
 }
@@ -89,8 +92,8 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
     let (last, owners) = segments.split_last().ok_or(UrlError::Path)?;
     // Azure DevOps puts `_git` before the name; the archive path leaves it out.
     let owners = owners.strip_suffix(&[AZURE_GIT_SEGMENT]).unwrap_or(owners);
-    let name = last.strip_suffix(".git").unwrap_or(last);
-    if owners.is_empty() || !is_safe_segment(name) {
+    let name = repo_name(last)?;
+    if owners.is_empty() {
         return Err(UrlError::Path);
     }
     Ok(RepoLocation {
@@ -99,6 +102,19 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         owner: owners.join("/"),
         name: name.to_owned(),
     })
+}
+
+/// The repository name of the last path segment, without `.git`.
+fn repo_name(last: &str) -> Result<&str, UrlError> {
+    let name = last.strip_suffix(".git").unwrap_or(last);
+    if !is_safe_segment(name) {
+        return Err(UrlError::Path);
+    }
+    // `<name>.wiki.git` is the wiki of `<name>`, archived in its directory.
+    if name.ends_with(".wiki") {
+        return Err(UrlError::Wiki);
+    }
+    Ok(name)
 }
 
 /// The host the repository is archived under: the bare name for SSH, the
@@ -368,6 +384,9 @@ mod tests {
             ("https://..:8080/a/b", UrlError::Invalid),
             ("ssh://git@./a/b", UrlError::Invalid),
             ("git@..:a/b", UrlError::Invalid),
+            // The archive keeps the wiki of `n` where `n.wiki` would go.
+            ("https://github.com/o/n.wiki.git", UrlError::Wiki),
+            ("https://github.com/o/n.wiki", UrlError::Wiki),
         ];
         for (input, expected) in cases {
             assert_eq!(parse(input), Err(expected), "{input}");

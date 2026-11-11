@@ -184,6 +184,7 @@ credentials = "Put the username and token in the token fields, not in the URL."
 query = "The URL must not end with a ? or # part."
 path = "The URL path must be owner/name with only letters, digits, '.', '-', '_' or '~'."
 gist_owner = "Enter the gist with its owner: https://gist.github.com/<user>/<id>"
+wiki = "A wiki is archived with its repository. Add the repository and turn on its wiki."
 
 [bulk]
 title = "Add many repositories"

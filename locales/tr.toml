@@ -178,6 +178,7 @@ credentials = "Kullanıcı adını ve token'ı URL'ye değil, kendi alanlarına 
 query = "URL'nin sonunda soru işareti (?) veya # ile başlayan bir ek olamaz."
 path = "URL yolu kullanıcı/repo biçiminde olmalı. Yolda yalnız harf, rakam, '.', '-', '_' ve '~' bulunabilir."
 gist_owner = "Gist'i sahibinin adıyla birlikte girin: https://gist.github.com/<kullanıcı>/<id>"
+wiki = "Wiki, reposuyla birlikte arşivlenir. Repoyu ekleyin ve wiki seçeneğini açın."
 
 [bulk]
 title = "Birden çok repo ekle"
