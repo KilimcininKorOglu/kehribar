@@ -9,6 +9,7 @@ pub mod format;
 pub mod git_http;
 pub mod highlight;
 pub mod history;
+pub mod hooks;
 pub mod host_ssh;
 pub mod hosts;
 pub mod markdown;
@@ -144,6 +145,8 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/wiki-file", get(wiki::file))
         .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
+        .route("/repos/{id}/webhook", post(hooks::renew))
+        .route("/repos/{id}/webhook/delete", post(hooks::remove))
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/{id}", get(hosts::show).post(hosts::update))
         .route("/hosts/{id}/delete", post(hosts::delete))
@@ -187,6 +190,8 @@ pub fn router(state: AppState) -> Router {
         .route("/static/{file}", get(pages::static_file))
         // Git clients authenticate with HTTP Basic, not with the session.
         .route("/git/{*path}", any(git_http::serve))
+        // The token in the path is the credential of a push webhook.
+        .route("/hooks/{token}", post(hooks::receive))
         .merge(private)
         .layer(from_fn(security::same_origin))
         .layer(from_fn(security::headers))

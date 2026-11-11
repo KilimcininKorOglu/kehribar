@@ -496,6 +496,16 @@ default_branch = "Default"
 history = "History"
 download = "Download:"
 
+[webhook]
+title = "Push webhook"
+help = "When the source server calls this URL after a push, the repository syncs at once instead of waiting for its interval. A call during a sync makes the repository sync once more when the sync finishes."
+setup = "Add the URL as a push webhook on the source server. Any content type works and no secret is needed, because the URL is the secret. Renew the URL if it leaked: the old one stops working."
+create = "Create webhook URL"
+renew = "Renew URL"
+remove = "Remove"
+created = "The webhook URL is ready. Add it on the source server."
+removed = "The webhook URL was removed."
+
 [clone]
 title = "Clone from the archive"
 help = "Git asks for a username and password: use the admin credentials of this site, or any username with a clone token from the access tokens page. Branches and tags are cloned."

@@ -483,6 +483,16 @@ default_branch = "Varsayılan"
 history = "Geçmiş"
 download = "İndir:"
 
+[webhook]
+title = "Push webhook'u"
+help = "Kaynak sunucu bir push'tan sonra bu URL'yi çağırınca repo, aralığını beklemeden hemen güncellenir. Güncelleme sürerken gelen bir çağrı, güncelleme bitince repoyu bir kez daha günceller."
+setup = "URL'yi kaynak sunucuda push webhook'u olarak ekleyin. Content type önemli değildir ve secret gerekmez, çünkü URL'nin kendisi secret'tır. URL başkasının eline geçtiyse yenileyin; eski URL çalışmaz."
+create = "Webhook URL'si oluştur"
+renew = "URL'yi yenile"
+remove = "Kaldır"
+created = "Webhook URL'si hazır. Kaynak sunucuya ekleyin."
+removed = "Webhook URL'si kaldırıldı."
+
 [clone]
 title = "Arşivden klonla"
 help = "Git kullanıcı adı ve parola sorduğunda bu sitenin yönetici bilgilerini girin. Erişim token'ları sayfasındaki bir clone token'ını da parola olarak kullanabilirsiniz; o zaman kullanıcı adı önemli değildir. Bu komut branch'leri ve tag'leri getirir."

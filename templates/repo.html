@@ -47,6 +47,30 @@
   <pre class="clone-command"><code>git clone --mirror {{ clone_url }}</code></pre>
 </section>
 
+<section class="card" id="webhook">
+  <h2>{{ layout.t("webhook.title") }}</h2>
+  <p class="muted small">{{ layout.t("webhook.help") }}</p>
+  {% if let Some(url) = webhook_url %}
+  <pre class="clone-command"><code>{{ url }}</code></pre>
+  <p class="muted small">{{ layout.t("webhook.setup") }}</p>
+  <div class="actions">
+    <form method="post" action="/repos/{{ repo.id }}/webhook">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <button class="btn btn-small" type="submit">{{ layout.t("webhook.renew") }}</button>
+    </form>
+    <form method="post" action="/repos/{{ repo.id }}/webhook/delete">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <button class="btn btn-danger btn-small" type="submit">{{ layout.t("webhook.remove") }}</button>
+    </form>
+  </div>
+  {% else %}
+  <form method="post" action="/repos/{{ repo.id }}/webhook">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <button class="btn" type="submit">{{ layout.t("webhook.create") }}</button>
+  </form>
+  {% endif %}
+</section>
+
 <section class="card">
   <h2>{{ layout.t("repo.history") }}</h2>
   {% if runs.is_empty() %}

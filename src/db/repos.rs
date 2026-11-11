@@ -299,7 +299,8 @@ pub async fn finish(pool: &SqlitePool, id: i64, outcome: &SyncOutcome<'_>) -> sq
     sqlx::query(
         "UPDATE repos SET status = ?1, \
          last_success_at = CASE WHEN ?1 = 'ok' THEN ?2 ELSE last_success_at END, \
-         next_sync_at = ?3, last_error = ?4, size_bytes = ?5, \
+         next_sync_at = CASE WHEN sync_requested = 1 THEN ?2 ELSE ?3 END, \
+         sync_requested = 0, last_error = ?4, size_bytes = ?5, \
          default_branch = COALESCE(?6, default_branch), has_wiki = ?7, lfs_size_bytes = ?8 \
          WHERE id = ?9",
     )
@@ -361,10 +362,51 @@ pub async fn record_repack(pool: &SqlitePool, id: i64, at: i64, saved: i64) -> s
     Ok(())
 }
 
-/// Makes the repository due now, for the "sync now" button.
+/// Makes the repository due now, for "sync now", a webhook or the API. A
+/// repository that is syncing syncs once more when it finishes; requests
+/// during one sync add up to that one more sync.
 pub async fn schedule_now(pool: &SqlitePool, id: i64, now: i64) -> sqlx::Result<bool> {
-    let result = sqlx::query("UPDATE repos SET next_sync_at = ? WHERE id = ?")
-        .bind(now)
+    let result = sqlx::query(
+        "UPDATE repos SET \
+         next_sync_at = CASE WHEN status = 'syncing' THEN next_sync_at ELSE ?1 END, \
+         sync_requested = CASE WHEN status = 'syncing' THEN 1 ELSE sync_requested END \
+         WHERE id = ?2",
+    )
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// The id of the repository whose webhook token has this hash.
+pub async fn find_by_webhook(pool: &SqlitePool, hash: &[u8]) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar("SELECT id FROM repos WHERE webhook_hash = ?")
+        .bind(hash)
+        .fetch_optional(pool)
+        .await
+}
+
+/// The encrypted webhook token of the repository, when it has one.
+pub async fn webhook_secret(pool: &SqlitePool, id: i64) -> sqlx::Result<Option<Vec<u8>>> {
+    let secret: Option<Option<Vec<u8>>> =
+        sqlx::query_scalar("SELECT webhook_enc FROM repos WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(secret.flatten())
+}
+
+/// Sets the webhook token as `(hash, encrypted token)`, or removes it.
+pub async fn set_webhook(
+    pool: &SqlitePool,
+    id: i64,
+    webhook: Option<(&[u8], &[u8])>,
+) -> sqlx::Result<bool> {
+    let (hash, encrypted) = webhook.unzip();
+    let result = sqlx::query("UPDATE repos SET webhook_hash = ?, webhook_enc = ? WHERE id = ?")
+        .bind(hash)
+        .bind(encrypted)
         .bind(id)
         .execute(pool)
         .await?;
@@ -517,6 +559,40 @@ mod tests {
         assert!(repo.has_wiki);
         assert_eq!(repo.lfs_size_bytes, 1024);
         assert!(claim(&pool, id, 300).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_request_during_a_sync_runs_one_more_sync() {
+        let (pool, id) = seeded().await;
+        let next =
+            |pool: SqlitePool| async move { get(&pool, id).await.unwrap().unwrap().next_sync_at };
+        let outcome = |finished_at: i64| SyncOutcome {
+            status: RepoStatus::Ok,
+            finished_at,
+            next_sync_at: finished_at + 3600,
+            error: None,
+            size_bytes: 1,
+            lfs_size_bytes: 0,
+            default_branch: None,
+            has_wiki: false,
+        };
+        // An idle repository is due at once.
+        assert!(schedule_now(&pool, id, 50).await.unwrap());
+        assert_eq!(next(pool.clone()).await, 50);
+
+        assert!(claim(&pool, id, 100).await.unwrap());
+        // Two requests during the sync leave the plan, and ask for one more.
+        assert!(schedule_now(&pool, id, 110).await.unwrap());
+        assert!(schedule_now(&pool, id, 120).await.unwrap());
+        assert_eq!(next(pool.clone()).await, 50);
+        finish(&pool, id, &outcome(130)).await.unwrap();
+        assert_eq!(next(pool.clone()).await, 130);
+
+        // The next sync goes back to the interval.
+        assert!(claim(&pool, id, 140).await.unwrap());
+        finish(&pool, id, &outcome(150)).await.unwrap();
+        assert_eq!(next(pool.clone()).await, 150 + 3600);
+        assert!(!schedule_now(&pool, 999, 1).await.unwrap());
     }
 
     #[tokio::test]

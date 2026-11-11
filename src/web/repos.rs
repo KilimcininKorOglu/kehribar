@@ -10,6 +10,7 @@ use serde::Deserialize;
 use super::AppState;
 use super::auth::CurrentSession;
 use super::form::{encrypt_token, is_checked, optional_number, optional_text};
+use super::hooks;
 use super::pages::{Layout, Nav, render};
 use super::prefs::Prefs;
 use crate::db::assets::{self, Check};
@@ -555,6 +556,8 @@ struct DetailPage {
     /// Archived images of the Markdown files.
     image_count: usize,
     image_check: Option<Check>,
+    /// The push webhook URL, when the repository has one.
+    webhook_url: Option<String>,
 }
 
 impl DetailPage {
@@ -649,6 +652,9 @@ async fn detail_page(
     let clone_url = clone_url(ctx, &repo);
     let image_count = assets::for_repo(&ctx.state.pool, repo.id).await?.len();
     let image_check = assets::last_check(&ctx.state.pool, repo.id).await?;
+    let webhook_url = hooks::current_token(ctx, repo.id)
+        .await?
+        .map(|token| hooks::webhook_url(ctx, &token));
     let layout = ctx.layout(Nav::Repos);
     let notice = notice_key.map(|key| layout.t(key).to_owned());
     let global_interval = layout.tf_number("repo.interval_global", &global.interval_minutes);
@@ -673,6 +679,7 @@ async fn detail_page(
         clone_url,
         image_count,
         image_check,
+        webhook_url,
     })
 }
 
@@ -705,6 +712,8 @@ fn notice_key(notice: Option<&str>) -> Option<&'static str> {
         "queued" => Some("repo.sync_queued"),
         "saved" => Some("repo.saved"),
         "credentials" => Some("cred.saved"),
+        "webhook_created" => Some("webhook.created"),
+        "webhook_removed" => Some("webhook.removed"),
         _ => None,
     }
 }

@@ -79,7 +79,7 @@ Every setting is an environment variable. Docker Compose reads them from `.env`.
 | `GIT_ARCHIVE_LOG_LEVEL` | `info` | Log filter, for example `debug` or `git_archive=debug`. |
 | `GIT_ARCHIVE_FSCK_INTERVAL_DAYS` | `7` | Days between two `git fsck` runs per repository. `0` turns the check off. |
 | `GIT_ARCHIVE_REPACK_INTERVAL_DAYS` | `7` | Days between two `git repack` runs per repository. `0` turns the repack off. |
-| `GIT_ARCHIVE_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page. |
+| `GIT_ARCHIVE_PUBLIC_URL` | empty | Address of the web interface, for example `https://archive.example.com`. Notifications then link to the repository page, and push webhook URLs start with it. |
 | `GIT_ARCHIVE_NOTIFY_WEBHOOK_URL` | empty | Every notification is POSTed to this URL as JSON. |
 | `GIT_ARCHIVE_NOTIFY_TELEGRAM_BOT_TOKEN` | empty | Telegram bot token from BotFather. |
 | `GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_ID` | empty | Chat that receives the Telegram notifications. |
@@ -244,6 +244,19 @@ git clone http://token:gac_...@localhost:8600/git/github.com/owner/name.git
 ```
 
 The server accepts only fetches; a push is refused. Wrong credentials count against the same per-address lockout as the login form. The file view has ZIP and tar.gz downloads of the selected revision.
+
+## Push webhooks
+
+A repository syncs at its interval. To sync it right after a push, create a webhook URL on its page ("Push webhook") and add it as a push webhook on the source server:
+
+```text
+http://localhost:8600/hooks/gaw_...
+```
+
+- The URL is the secret: the token in it is random, stored as a SHA-256 hash and, encrypted with `GIT_ARCHIVE_SECRET_KEY`, for showing it again on the page. No webhook secret or signature is needed, and the payload is not read, so every provider works the same way.
+- A `POST` answers `202` and makes the repository due at once. A call while the repository syncs makes it sync once more when that sync finishes; several calls during one sync add up to that one more sync.
+- "Renew URL" replaces the token and the old URL answers `404`; "Remove" deletes it. Wrong tokens count against the per-address lockout of the login form.
+- The URL uses `GIT_ARCHIVE_PUBLIC_URL` when it is set, else the address the browser used.
 
 ## Development
 
