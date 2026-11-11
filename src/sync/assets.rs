@@ -292,10 +292,13 @@ async fn write_part(part: &Path, file: &Path, data: &[u8]) -> std::io::Result<()
     Err(err)
 }
 
-/// Writes `data` to `part` and renames it to `file`.
+/// Writes `data` to `part`, flushes it to the disk and renames it to
+/// `file`. Without the flush, a power loss after the rename can leave an
+/// empty file under the hash, and later syncs keep it as the image.
 async fn write_durably(part: &Path, file: &Path, data: &[u8]) -> std::io::Result<()> {
     let mut out = tokio::fs::File::create(part).await?;
     out.write_all(data).await?;
+    out.sync_all().await?;
     drop(out);
     tokio::fs::rename(part, file).await
 }
