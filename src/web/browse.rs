@@ -68,7 +68,8 @@ pub struct BrowseQuery {
     rev: Option<String>,
     path: Option<String>,
     q: Option<String>,
-    page: Option<usize>,
+    /// Text, read leniently: a page that is not a number is the first.
+    page: Option<String>,
     format: Option<String>,
     /// `source` shows a Markdown file as text instead of rendered.
     view: Option<String>,
@@ -858,7 +859,12 @@ pub async fn commits(
             "the search text cannot hold a NUL character",
         )));
     }
-    let page = query.page.unwrap_or(1).clamp(1, 100_000);
+    let page = query
+        .page
+        .as_deref()
+        .and_then(|p| p.trim().parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 100_000);
     let mut commits = match view.commit.as_deref() {
         Some(commit) => {
             let filter = (!search.is_empty()).then_some(search.as_str());

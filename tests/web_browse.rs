@@ -315,6 +315,10 @@ async fn history_search_and_commit_diff() {
 
     let found = page(&t, "/repos/1/commits?q=GUIDE").await;
     assert!(found.contains("Update the guide") && !found.contains("initial import"));
+    // A page that is not a number shows the first page, as on other lists.
+    for uri in ["/repos/1/commits?page=x", "/repos/1/tree?page=-1"] {
+        assert_eq!(t.get(uri).await.status(), StatusCode::OK, "{uri}");
+    }
     let none = page(&t, "/repos/1/commits?q=nothing-matches").await;
     assert!(none.contains("Eşleşen commit yok."));
 
