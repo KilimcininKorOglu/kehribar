@@ -196,7 +196,10 @@ async fn history_page_shows_a_past_day() {
         far.contains(&format!("/repos/1/commit/{new_main}")),
         "{far}"
     );
-    assert!(!far.contains("200000000000000000"));
+    // The number stays only in the return path of the preference form; no
+    // pager link names it.
+    assert!(far.contains("name=\"back\" value=\"/repos/1/history?page=200000000000000000\""));
+    assert_eq!(far.matches("200000000000000000").count(), 1, "{far}");
     assert!(today.contains("İlerledi"));
     assert!(today.contains(&format!("value=\"{}\"", day(0))));
 
