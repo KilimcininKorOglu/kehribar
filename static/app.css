@@ -477,6 +477,7 @@ textarea:focus {
 }
 
 .card + .card,
+#source-table + .card,
 .card + .grid-2,
 .grid-2 + .card,
 .alert + .card,
