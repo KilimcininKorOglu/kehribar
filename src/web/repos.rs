@@ -13,7 +13,7 @@ use super::form::{encrypt_token, is_checked, optional_number, optional_text};
 use super::pages::{Layout, Nav, render};
 use super::prefs::Prefs;
 use crate::db::hosts::{self, Host};
-use crate::db::repos::{self, NewRepo, Repo, RepoSettings, RepoStatus};
+use crate::db::repos::{self, ListFilter, NewRepo, Repo, RepoSettings, RepoSort, RepoStatus};
 use crate::db::sync_runs::{self, SyncRun};
 use crate::db::unix_now;
 use crate::error::AppError;
@@ -70,19 +70,234 @@ where
     }
 }
 
+/// Repositories on one page of the list.
+const PAGE_SIZE: i64 = 50;
+
 #[derive(Template)]
 #[template(path = "repos.html")]
 struct ListPage {
     layout: Layout,
     repos: Vec<Repo>,
-    query: String,
-    total: usize,
+    view: ListView,
+    /// Repositories in the archive, whatever the filter.
+    total: i64,
+    chips: Vec<Chip>,
+    heads: Vec<Head>,
+    pager: Option<Pager>,
     busy: bool,
+}
+
+/// A status filter link above the list.
+struct Chip {
+    label: String,
+    url: String,
+    count: i64,
+    current: bool,
+}
+
+/// A column head; a sortable column links to its sort.
+struct Head {
+    label: String,
+    url: Option<String>,
+    /// `aria-sort`: `ascending`, `descending` or `none`.
+    aria: &'static str,
+    /// The arrow after the label of the sorted column.
+    arrow: &'static str,
+    numeric: bool,
+}
+
+/// The page links of a list on several pages.
+struct Pager {
+    note: String,
+    prev: Option<String>,
+    next: Option<String>,
+    links: Vec<PageLink>,
+}
+
+/// One page link; a link without a number stands for skipped pages.
+struct PageLink {
+    number: Option<i64>,
+    url: String,
+    current: bool,
+}
+
+/// The filter, sort and page of the list as the links of the page need them.
+#[derive(Debug, Clone)]
+pub struct ListView {
+    pub query: String,
+    pub status: Option<RepoStatus>,
+    pub sort: RepoSort,
+    pub descending: bool,
+    pub page: i64,
+}
+
+impl ListView {
+    fn from_query(query: ListQuery) -> Self {
+        let sort = query
+            .sort
+            .as_deref()
+            .and_then(RepoSort::parse)
+            .unwrap_or_default();
+        Self {
+            query: query.q.unwrap_or_default(),
+            status: query.status.as_deref().and_then(RepoStatus::parse),
+            sort,
+            descending: query.dir.as_deref() == Some("desc"),
+            page: query
+                .page
+                .as_deref()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(1)
+                .max(1),
+        }
+    }
+
+    /// The list URL with this view's values and the given changes.
+    fn url(
+        &self,
+        status: Option<RepoStatus>,
+        sort: RepoSort,
+        descending: bool,
+        page: i64,
+    ) -> String {
+        let mut out = url::form_urlencoded::Serializer::new(String::new());
+        if !self.query.is_empty() {
+            out.append_pair("q", &self.query);
+        }
+        if let Some(status) = status {
+            out.append_pair("status", status.code());
+        }
+        if sort != RepoSort::default() || descending {
+            out.append_pair("sort", sort.code());
+            out.append_pair("dir", if descending { "desc" } else { "asc" });
+        }
+        if page > 1 {
+            out.append_pair("page", &page.to_string());
+        }
+        let query = out.finish();
+        if query.is_empty() {
+            String::from("/")
+        } else {
+            format!("/?{query}")
+        }
+    }
+
+    fn page_url(&self, page: i64) -> String {
+        self.url(self.status, self.sort, self.descending, page)
+    }
+
+    /// The "all" link and one link per status that has repositories or is
+    /// the current filter. `found` holds the counts of the search.
+    fn chips(&self, layout: &Layout, found: &[(RepoStatus, i64)]) -> Vec<Chip> {
+        let all = Chip {
+            label: layout.t("repos.status_all").to_owned(),
+            url: self.url(None, self.sort, self.descending, 1),
+            count: found.iter().map(|(_, n)| n).sum(),
+            current: self.status.is_none(),
+        };
+        let per_status = RepoStatus::ALL.iter().filter_map(|status| {
+            let count = count_of(found, *status);
+            let current = self.status == Some(*status);
+            (count > 0 || current).then(|| Chip {
+                label: layout.status_label(status).to_owned(),
+                url: self.url(Some(*status), self.sort, self.descending, 1),
+                count,
+                current,
+            })
+        });
+        std::iter::once(all).chain(per_status).collect()
+    }
+
+    /// The column heads in table order; "next sync" is not sortable.
+    fn heads(&self, layout: &Layout) -> Vec<Head> {
+        let columns = [
+            ("repos.col_repo", Some(RepoSort::Name)),
+            ("repos.col_status", Some(RepoSort::Status)),
+            ("repos.col_last_sync", Some(RepoSort::Synced)),
+            ("repos.col_next", None),
+            ("repos.col_size", Some(RepoSort::Size)),
+        ];
+        columns
+            .into_iter()
+            .map(|(key, sort)| self.head(layout.t(key), sort))
+            .collect()
+    }
+
+    /// One column head; the column sorted already turns its direction.
+    fn head(&self, label: &str, sort: Option<RepoSort>) -> Head {
+        let sorted = sort == Some(self.sort);
+        let (aria, arrow) = match (sorted, self.descending) {
+            (false, _) => ("none", ""),
+            (true, false) => ("ascending", " ↑"),
+            (true, true) => ("descending", " ↓"),
+        };
+        Head {
+            label: label.to_owned(),
+            url: sort.map(|s| self.url(self.status, s, sorted && !self.descending, 1)),
+            aria,
+            arrow,
+            numeric: sort == Some(RepoSort::Size),
+        }
+    }
+
+    /// The pager of a list on `pages` pages: the first and the last page and
+    /// the ones around the current page, with a gap for the pages between.
+    fn pager(&self, layout: &Layout, pages: i64, shown: usize, matching: i64) -> Option<Pager> {
+        if pages <= 1 {
+            return None;
+        }
+        let current = self.page;
+        let mut links = Vec::new();
+        let mut last = 0;
+        for n in (1..=pages).filter(|n| *n == 1 || *n == pages || (n - current).abs() <= 2) {
+            if n > last + 1 {
+                links.push(PageLink {
+                    number: None,
+                    url: String::new(),
+                    current: false,
+                });
+            }
+            links.push(PageLink {
+                number: Some(n),
+                url: self.page_url(n),
+                current: n == current,
+            });
+            last = n;
+        }
+        let from = (current - 1) * PAGE_SIZE + 1;
+        let to = from + shown as i64 - 1;
+        let note = layout.tf(
+            "repos.showing",
+            &[
+                ("from", &from.to_string()),
+                ("to", &to.to_string()),
+                ("n", &matching.to_string()),
+            ],
+        );
+        Some(Pager {
+            note,
+            prev: (current > 1).then(|| self.page_url(current - 1)),
+            next: (current < pages).then(|| self.page_url(current + 1)),
+            links,
+        })
+    }
+}
+
+/// The number of repositories with `status` in `found`.
+fn count_of(found: &[(RepoStatus, i64)], status: RepoStatus) -> i64 {
+    found
+        .iter()
+        .find_map(|(s, n)| (*s == status).then_some(*n))
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
     q: Option<String>,
+    status: Option<String>,
+    sort: Option<String>,
+    dir: Option<String>,
+    page: Option<String>,
 }
 
 pub async fn list(
@@ -90,23 +305,37 @@ pub async fn list(
     OriginalUri(uri): OriginalUri,
     Query(query): Query<ListQuery>,
 ) -> Result<Response, AppError> {
-    let query = query.q.unwrap_or_default();
-    let repos = repos::list(&ctx.state.pool, Some(&query)).await?;
-    let total = if query.trim().is_empty() {
-        repos.len()
-    } else {
-        repos::list(&ctx.state.pool, None).await?.len()
+    let mut view = ListView::from_query(query);
+    let pool = &ctx.state.pool;
+    let found = repos::status_counts(pool, &view.query).await?;
+    let matching = match view.status {
+        Some(status) => count_of(&found, status),
+        None => found.iter().map(|(_, n)| n).sum(),
     };
+    let pages = ((matching + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
+    view.page = view.page.min(pages);
+    let filter = ListFilter {
+        search: &view.query,
+        status: view.status,
+        sort: view.sort,
+        descending: view.descending,
+        limit: PAGE_SIZE,
+        offset: (view.page - 1) * PAGE_SIZE,
+    };
+    let repos = repos::page(pool, &filter).await?;
     let busy = repos
         .iter()
         .any(|r| matches!(r.status, RepoStatus::Pending | RepoStatus::Syncing));
     let mut layout = ctx.layout(Nav::Repos);
     layout.path = uri.to_string();
     let page = ListPage {
+        chips: view.chips(&layout, &found),
+        heads: view.heads(&layout),
+        pager: view.pager(&layout, pages, repos.len(), matching),
+        total: repos::count(pool).await?,
         layout,
         repos,
-        query,
-        total,
+        view,
         busy,
     };
     Ok(render(&page)?.into_response())

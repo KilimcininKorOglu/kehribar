@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1>{{ layout.t("repos.title") }}</h1>
-    <p class="muted">{{ layout.tf_number("repos.count", total as i64) }}</p>
+    <p class="muted">{{ layout.tf_number("repos.count", total) }}</p>
   </div>
   <a class="btn btn-primary" href="/repos/new">{{ layout.t("repos.add") }}</a>
 </div>
@@ -14,9 +14,14 @@
 {% if total > 0 %}
 <form class="search" method="get" action="/" role="search">
   <label class="visually-hidden" for="q">{{ layout.t("repos.search") }}</label>
-  <input id="q" type="search" name="q" value="{{ query }}" placeholder="{{ layout.t("repos.search_placeholder") }}"
-         hx-get="/" hx-trigger="input changed delay:300ms, search" hx-target="#repo-table"
+  <input id="q" type="search" name="q" value="{{ view.query }}" placeholder="{{ layout.t("repos.search_placeholder") }}"
+         hx-get="/" hx-include="closest form" hx-trigger="input changed delay:300ms, search" hx-target="#repo-table"
          hx-select="#repo-table" hx-swap="outerHTML" hx-push-url="true">
+  {% if let Some(status) = view.status %}<input type="hidden" name="status" value="{{ status.code() }}">{% endif %}
+  {% if view.sort != RepoSort::Name || view.descending %}
+  <input type="hidden" name="sort" value="{{ view.sort.code() }}">
+  <input type="hidden" name="dir" value="{% if view.descending %}desc{% else %}asc{% endif %}">
+  {% endif %}
 </form>
 {% endif %}
 
@@ -27,20 +32,30 @@
     <p class="muted">{{ layout.t("repos.empty_body") }}</p>
     <a class="btn btn-primary" href="/repos/new">{{ layout.t("repos.add") }}</a>
   </section>
-{% else if repos.is_empty() %}
+{% else %}
+  <nav class="chips" aria-label="{{ layout.t("repos.filter_status") }}">
+    {% for chip in chips %}
+    <a class="chip" href="{{ chip.url }}"{% if chip.current %} aria-current="true"{% endif %}>{{ chip.label }} <span class="chip-count">{{ chip.count }}</span></a>
+    {% endfor %}
+  </nav>
+  {% if repos.is_empty() %}
   <section class="card empty-state">
     <p class="muted">{{ layout.t("repos.no_match") }}</p>
   </section>
-{% else %}
+  {% else %}
   <div class="card table-card">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">{{ layout.t("repos.col_repo") }}</th>
-          <th scope="col">{{ layout.t("repos.col_status") }}</th>
-          <th scope="col">{{ layout.t("repos.col_last_sync") }}</th>
-          <th scope="col">{{ layout.t("repos.col_next") }}</th>
-          <th scope="col" class="num">{{ layout.t("repos.col_size") }}</th>
+          {% for head in heads %}
+          <th scope="col"{% if head.numeric %} class="num"{% endif %}{% if head.url.is_some() %} aria-sort="{{ head.aria }}"{% endif %}>
+            {%- if let Some(url) = head.url -%}
+            <a class="sort-link" href="{{ url }}">{{ head.label }}{% if !head.arrow.is_empty() %}<span aria-hidden="true">{{ head.arrow }}</span>{% endif %}</a>
+            {%- else -%}
+            {{ head.label }}
+            {%- endif -%}
+          </th>
+          {% endfor %}
         </tr>
       </thead>
       <tbody>
@@ -61,6 +76,23 @@
       </tbody>
     </table>
   </div>
+  {% if let Some(pager) = pager %}
+  <nav class="pager" aria-label="{{ layout.t("repos.pages") }}">
+    <p class="muted small">{{ pager.note }}</p>
+    <ul>
+      {% if let Some(url) = pager.prev %}<li><a href="{{ url }}" rel="prev">{{ layout.t("repos.prev") }}</a></li>{% endif %}
+      {% for link in pager.links %}
+      {% if let Some(n) = link.number %}
+      <li>{% if link.current %}<span aria-current="page">{{ n }}</span>{% else %}<a href="{{ link.url }}">{{ n }}</a>{% endif %}</li>
+      {% else %}
+      <li><span class="muted" aria-hidden="true">…</span></li>
+      {% endif %}
+      {% endfor %}
+      {% if let Some(url) = pager.next %}<li><a href="{{ url }}" rel="next">{{ layout.t("repos.next") }}</a></li>{% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+  {% endif %}
 {% endif %}
 </div>
 {% endblock %}

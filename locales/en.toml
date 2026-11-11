@@ -49,6 +49,12 @@ col_size = "Size"
 empty_title = "No archived repositories yet"
 empty_body = "Add a Git URL to archive your first repository."
 no_match = "No repository matches the search."
+filter_status = "Filter by status"
+status_all = "All"
+pages = "Pages"
+prev = "Previous"
+next = "Next"
+showing = "Showing {from}–{to} of {n} repositories."
 
 [status]
 pending = "Pending"

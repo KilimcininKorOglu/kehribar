@@ -48,6 +48,12 @@ col_size = "Boyut"
 empty_title = "Arşivde henüz repo yok"
 empty_body = "İlk repoyu arşivlemek için Git URL'sini ekleyin."
 no_match = "Aramanızla eşleşen repo yok."
+filter_status = "Duruma göre süz"
+status_all = "Tümü"
+pages = "Sayfalar"
+prev = "Önceki"
+next = "Sonraki"
+showing = "{n} repodan {from}–{to} arası gösteriliyor."
 
 [status]
 pending = "Sırada"

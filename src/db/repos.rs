@@ -171,6 +171,93 @@ pub async fn list(pool: &SqlitePool, search: Option<&str>) -> sqlx::Result<Vec<R
     .await
 }
 
+text_enum! {
+    /// The column the repository list is sorted by.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum RepoSort {
+        #[default]
+        Name => "name",
+        Size => "size",
+        Synced => "synced",
+        Status => "status",
+    }
+}
+
+/// Matches the search term of [`list`] and an optional status.
+const FILTER: &str = "WHERE (url LIKE ?1 ESCAPE '\\' OR (owner || '/' || name) LIKE ?1 ESCAPE '\\') \
+     AND (?2 IS NULL OR status = ?2)";
+
+/// Problems first, then work in progress, then the repositories that are up to date.
+const STATUS_RANK: &str = "CASE status WHEN 'error' THEN 0 WHEN 'unreachable' THEN 1 \
+     WHEN 'syncing' THEN 2 WHEN 'pending' THEN 3 ELSE 4 END";
+
+/// One page of the repository list.
+#[derive(Debug, Clone)]
+pub struct ListFilter<'a> {
+    pub search: &'a str,
+    pub status: Option<RepoStatus>,
+    pub sort: RepoSort,
+    pub descending: bool,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl ListFilter<'_> {
+    /// The `ORDER BY` clause, built only from fixed column names.
+    fn order_by(&self) -> String {
+        let dir = if self.descending { "DESC" } else { "ASC" };
+        let key = match self.sort {
+            RepoSort::Name => format!("host {dir}, owner {dir}, name {dir}"),
+            RepoSort::Size => format!("size_bytes {dir}, host, owner, name"),
+            // Never synced repositories come last in both directions.
+            RepoSort::Synced => {
+                format!("last_sync_at IS NULL, last_sync_at {dir}, host, owner, name")
+            }
+            RepoSort::Status => format!("{STATUS_RANK} {dir}, host, owner, name"),
+        };
+        format!("ORDER BY {key}")
+    }
+}
+
+/// The repositories of one list page.
+pub async fn page(pool: &SqlitePool, filter: &ListFilter<'_>) -> sqlx::Result<Vec<Repo>> {
+    let sql = format!(
+        "{} {FILTER} {} LIMIT ?3 OFFSET ?4",
+        select_repos!(""),
+        filter.order_by()
+    );
+    // The statement holds constants only; every value is bound.
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(like_pattern(filter.search.trim()))
+        .bind(filter.status)
+        .bind(filter.limit)
+        .bind(filter.offset)
+        .fetch_all(pool)
+        .await
+}
+
+/// The number of repositories in the archive.
+pub async fn count(pool: &SqlitePool) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM repos")
+        .fetch_one(pool)
+        .await
+}
+
+/// The number of repositories per status that match `search`.
+pub async fn status_counts(
+    pool: &SqlitePool,
+    search: &str,
+) -> sqlx::Result<Vec<(RepoStatus, i64)>> {
+    sqlx::query_as(
+        "SELECT status, COUNT(*) FROM repos \
+         WHERE url LIKE ?1 ESCAPE '\\' OR (owner || '/' || name) LIKE ?1 ESCAPE '\\' \
+         GROUP BY status",
+    )
+    .bind(like_pattern(search.trim()))
+    .fetch_all(pool)
+    .await
+}
+
 /// Repositories whose next sync time has passed and that are not syncing now.
 pub async fn due(pool: &SqlitePool, now: i64, limit: i64) -> sqlx::Result<Vec<Repo>> {
     sqlx::query_as(select_repos!(

@@ -152,6 +152,190 @@ async fn search_filters_the_list() {
     assert!(none.contains("Aramanızla eşleşen repo yok."));
 }
 
+/// Adds `example.com/team/repo-000` to `repo-119` (ids 1 to 120). Every
+/// fourth one from 0 failed, every fourth one from 1 is up to date with a
+/// size of `i * 1000`; both last synced at `1000 + i`. The rest are pending
+/// and never synced.
+async fn seed_list(pool: &sqlx::SqlitePool) {
+    for i in 0..120_i64 {
+        let name = format!("repo-{i:03}");
+        let url = format!("https://example.com/team/{name}.git");
+        let new = repos::NewRepo {
+            url: &url,
+            host: "example.com",
+            owner: "team",
+            name: &name,
+            source_id: None,
+            username: None,
+            token_enc: None,
+            interval_minutes: None,
+            wiki_enabled: false,
+        };
+        let id = repos::insert(pool, &new, 1).await.unwrap().unwrap();
+        let status = match i % 4 {
+            0 => RepoStatus::Error,
+            1 => RepoStatus::Ok,
+            _ => continue,
+        };
+        assert!(repos::claim(pool, id, 1000 + i).await.unwrap());
+        let outcome = repos::SyncOutcome {
+            status,
+            finished_at: 1000 + i,
+            next_sync_at: 5000,
+            error: None,
+            size_bytes: if status == RepoStatus::Ok {
+                i * 1000
+            } else {
+                0
+            },
+            lfs_size_bytes: 0,
+            default_branch: None,
+            has_wiki: false,
+        };
+        repos::finish(pool, id, &outcome).await.unwrap();
+    }
+}
+
+/// The repository ids of the list rows, in order.
+fn row_ids(html: &str) -> Vec<i64> {
+    html.split("<a class=\"repo-name\" href=\"/repos/")
+        .skip(1)
+        .map(|rest| rest.split('"').next().unwrap().parse().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn list_is_paged_by_fifty() {
+    let t = TestApp::new().await;
+    seed_list(&t.state.pool).await;
+
+    let first = body_text(t.get("/").await).await;
+    assert_eq!(row_ids(&first), (1..=50).collect::<Vec<_>>());
+    assert!(
+        first.contains("120 repodan 1–50 arası gösteriliyor."),
+        "{first}"
+    );
+    assert!(first.contains("href=\"/?page=2\" rel=\"next\""));
+    assert!(!first.contains("rel=\"prev\""));
+
+    let third = body_text(t.get("/?page=3").await).await;
+    assert_eq!(row_ids(&third), (101..=120).collect::<Vec<_>>());
+    assert!(third.contains("120 repodan 101–120 arası gösteriliyor."));
+    assert!(third.contains("<span aria-current=\"page\">3</span>"));
+    assert!(third.contains("href=\"/?page=2\" rel=\"prev\""));
+    assert!(!third.contains("rel=\"next\""));
+
+    // A page past the end shows the last page; a bad number the first.
+    assert_eq!(
+        row_ids(&body_text(t.get("/?page=99").await).await),
+        row_ids(&third)
+    );
+    assert_eq!(
+        row_ids(&body_text(t.get("/?page=x").await).await),
+        row_ids(&first)
+    );
+}
+
+#[tokio::test]
+async fn status_filter_shows_counts_and_keeps_the_sort() {
+    let t = TestApp::new().await;
+    seed_list(&t.state.pool).await;
+
+    let all = body_text(t.get("/").await).await;
+    assert!(
+        all.contains("Tümü <span class=\"chip-count\">120</span>"),
+        "{all}"
+    );
+    assert!(all.contains("Hata <span class=\"chip-count\">30</span>"));
+    assert!(all.contains("Güncel <span class=\"chip-count\">30</span>"));
+    assert!(all.contains("Sırada <span class=\"chip-count\">60</span>"));
+    // A status without repositories gets no chip.
+    assert!(!all.contains("Güncelleniyor <span"));
+
+    let errors = body_text(t.get("/?status=error&sort=size&dir=desc").await).await;
+    let ids = row_ids(&errors);
+    assert_eq!(ids.len(), 30);
+    assert!(ids.iter().all(|id| (id - 1) % 4 == 0), "{ids:?}");
+    // One page only, so no pager.
+    assert!(!errors.contains("class=\"pager\""));
+    assert!(
+        errors.contains("href=\"/?status=error&#38;sort=size&#38;dir=desc\" aria-current=\"true\"")
+    );
+    assert!(errors.contains("href=\"/?sort=size&#38;dir=desc\">Tümü"));
+    // The search form keeps the filter and the sort.
+    assert!(errors.contains("<input type=\"hidden\" name=\"status\" value=\"error\">"));
+    assert!(errors.contains("<input type=\"hidden\" name=\"dir\" value=\"desc\">"));
+
+    // An unknown status lists every repository.
+    assert_eq!(
+        row_ids(&body_text(t.get("/?status=nope").await).await).len(),
+        50
+    );
+}
+
+#[tokio::test]
+async fn every_column_sorts_both_ways() {
+    let t = TestApp::new().await;
+    seed_list(&t.state.pool).await;
+    let first_ids = async |query: &str| row_ids(&body_text(t.get(query).await).await);
+
+    assert_eq!(first_ids("/?sort=name&dir=asc").await[0], 1);
+    assert_eq!(first_ids("/?sort=name&dir=desc").await[0], 120);
+    // The largest repository is repo-117; size ties sort by name.
+    assert_eq!(first_ids("/?sort=size&dir=desc").await[0], 118);
+    assert_eq!(first_ids("/?sort=size&dir=asc").await[..2], [1, 3]);
+    // Last synced: repo-000 first, repo-117 last; never synced ones come last both ways.
+    assert_eq!(first_ids("/?sort=synced&dir=asc").await[0], 1);
+    let synced_desc = first_ids("/?sort=synced&dir=desc").await;
+    assert_eq!(synced_desc[..2], [118, 117]);
+    let tail = first_ids("/?sort=synced&dir=desc&page=3").await;
+    assert_eq!(tail.last(), Some(&120));
+    assert_eq!(
+        first_ids("/?sort=synced&dir=asc&page=3").await.last(),
+        Some(&120)
+    );
+    // Problems first, up to date last.
+    assert_eq!(first_ids("/?sort=status&dir=asc").await[0], 1);
+    assert_eq!(first_ids("/?sort=status&dir=desc").await[0], 2);
+    // An unknown column sorts by name.
+    assert_eq!(first_ids("/?sort=bogus").await[0], 1);
+
+    let html = body_text(t.get("/?sort=size&dir=asc").await).await;
+    // The sorted column turns its direction; another column starts ascending.
+    assert!(html.contains("aria-sort=\"ascending\">"));
+    assert!(
+        html.contains("href=\"/?sort=size&#38;dir=desc\">Boyut"),
+        "{html}"
+    );
+    // Name ascending is the default, so its link carries no sort.
+    assert!(html.contains("href=\"/\">Repo"));
+    let name_asc = body_text(t.get("/").await).await;
+    assert!(name_asc.contains("href=\"/?sort=name&#38;dir=desc\">Repo"));
+}
+
+#[tokio::test]
+async fn search_and_status_filter_work_together() {
+    let t = TestApp::new().await;
+    seed_list(&t.state.pool).await;
+
+    let html = body_text(t.get("/?q=repo-01&status=ok").await).await;
+    // repo-013 and repo-017 are the up to date ones of repo-010 to repo-019.
+    assert_eq!(row_ids(&html), [14, 18]);
+    assert!(
+        html.contains("Tümü <span class=\"chip-count\">10</span>"),
+        "{html}"
+    );
+    assert!(html.contains("Güncel <span class=\"chip-count\">2</span>"));
+    assert!(html.contains("href=\"/?q=repo-01&#38;status=error\""));
+    // The total under the title counts the whole archive.
+    assert!(html.contains("Arşivde 120 repo var."));
+
+    let none = body_text(t.get("/?q=repo-01&status=syncing").await).await;
+    assert!(none.contains("Aramanızla eşleşen repo yok."));
+    // The current filter keeps its chip even with no repository.
+    assert!(none.contains("Güncelleniyor <span class=\"chip-count\">0</span>"));
+}
+
 #[tokio::test]
 async fn detail_page_sync_now_and_repository_settings() {
     let t = TestApp::new().await;
