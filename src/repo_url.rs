@@ -102,13 +102,16 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
 }
 
 /// The host the repository is archived under: the bare name for SSH, the
-/// name with a non-default port for HTTP(S).
+/// name with a non-default port for HTTP(S). The host becomes a directory
+/// name, so `.`, `..` and every name that starts with a dot are refused:
+/// the URL parser accepts them, and `..` would leave the archive.
 fn archive_host(url: &Url, ssh: bool) -> Option<String> {
-    if ssh {
+    let host = if ssh {
         url.host_str().map(str::to_ascii_lowercase)
     } else {
         host_with_port(url)
-    }
+    }?;
+    (!host.starts_with('.')).then_some(host)
 }
 
 /// Whether a stored repository URL is fetched over SSH.
@@ -357,6 +360,14 @@ mod tests {
             ("https://github.com/a/%2e%2e", UrlError::Path),
             ("https://github.com/a/b%20c", UrlError::Path),
             ("https://github.com/a/.git", UrlError::Path),
+            // A dot host would put the archive outside its host directory.
+            (
+                "https://../repos/github.com/rust-lang/rust",
+                UrlError::Invalid,
+            ),
+            ("https://..:8080/a/b", UrlError::Invalid),
+            ("ssh://git@./a/b", UrlError::Invalid),
+            ("git@..:a/b", UrlError::Invalid),
         ];
         for (input, expected) in cases {
             assert_eq!(parse(input), Err(expected), "{input}");
