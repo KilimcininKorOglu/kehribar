@@ -1019,6 +1019,73 @@ pre.diff {
   font-weight: 600;
 }
 
+/* Disk page */
+
+/* The plot stretches to its cell; the labels are HTML so they keep their
+   size. The size labels sit on the top, middle and bottom grid lines. */
+.chart {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 0.6rem;
+  margin: 0.75rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-sizes {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin: -0.6em 0;
+}
+
+.chart-plot {
+  display: block;
+  width: 100%;
+  height: 200px;
+  overflow: visible;
+}
+
+.chart-dates {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart-area {
+  fill: var(--accent-soft);
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.chart-dot {
+  stroke: var(--accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+@media (max-width: 600px) {
+  .chart-plot {
+    height: 150px;
+  }
+}
+
+.table-card-title {
+  padding: 1rem 1rem 0;
+}
+
 /* Repository list filters */
 
 .chips {

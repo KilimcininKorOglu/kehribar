@@ -7,6 +7,7 @@ pub mod sessions;
 pub mod settings;
 pub mod sources;
 pub mod sync_runs;
+pub mod usage;
 
 use std::path::Path;
 use std::str::FromStr;

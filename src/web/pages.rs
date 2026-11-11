@@ -41,6 +41,7 @@ pub enum Nav {
     Repos,
     Sources,
     Hosts,
+    Disk,
     Settings,
 }
 
@@ -205,6 +206,7 @@ impl Layout {
             (Nav::Repos, "repos")
                 | (Nav::Sources, "sources")
                 | (Nav::Hosts, "hosts")
+                | (Nav::Disk, "disk")
                 | (Nav::Settings, "settings")
         );
         if active { "page" } else { "false" }

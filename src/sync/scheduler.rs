@@ -12,7 +12,7 @@ use super::{SyncContext, source_scan, worker};
 use crate::backup;
 use crate::db::repos::Repo;
 use crate::db::sources::{self, Source};
-use crate::db::{hosts, repos, unix_now};
+use crate::db::{hosts, repos, unix_now, usage};
 use crate::repo_url;
 use crate::settings::{self, SyncSettings};
 
@@ -128,6 +128,9 @@ impl Scheduler {
                 }
                 if let Err(err) = self.backup_if_due().await {
                     tracing::error!(%err, "backup could not start");
+                }
+                if let Err(err) = usage::record_day(&self.ctx.pool, unix_now()).await {
+                    tracing::error!(%err, "cannot record the disk usage of the day");
                 }
                 tokio::select! {
                     () = tokio::time::sleep(TICK) => {},

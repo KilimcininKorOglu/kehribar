@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("disk.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ layout.t("disk.title") }}</h1>
+    <p class="muted">{{ layout.t("disk.intro") }}</p>
+  </div>
+</div>
+
+<section class="card">
+  <dl class="facts">
+    <div><dt>{{ layout.t("disk.total") }}</dt><dd>{{ layout.bytes(totals.total_bytes) }}</dd></div>
+    <div><dt>{{ layout.t("disk.lfs") }}</dt><dd>{{ layout.bytes(totals.lfs_bytes) }}</dd></div>
+    <div><dt>{{ layout.t("disk.repos") }}</dt><dd>{{ totals.repo_count }}</dd></div>
+  </dl>
+</section>
+
+<section class="card">
+  <h2>{{ layout.t("disk.chart_title") }}</h2>
+  {% if let Some(chart) = chart %}
+  <figure class="chart" role="img" aria-label="{{ chart.summary }}">
+    <div class="chart-sizes" aria-hidden="true">
+      {% for label in chart.sizes %}<span>{{ label }}</span>{% endfor %}
+    </div>
+    {#- The viewBox is the plot box of src/web/disk.rs (1000 × 300). -#}
+    <svg class="chart-plot" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+      <line class="chart-grid" x1="0" x2="1000" y1="0" y2="0" vector-effect="non-scaling-stroke"/>
+      <line class="chart-grid" x1="0" x2="1000" y1="150" y2="150" vector-effect="non-scaling-stroke"/>
+      <line class="chart-grid" x1="0" x2="1000" y1="300" y2="300" vector-effect="non-scaling-stroke"/>
+      <polygon class="chart-area" points="{{ chart.area }}"/>
+      <polyline class="chart-line" points="{{ chart.line }}" vector-effect="non-scaling-stroke"/>
+      {#- A line of no length with round caps draws a round dot at any scale. -#}
+      <line class="chart-dot" x1="{{ chart.last.0 }}" y1="{{ chart.last.1 }}" x2="{{ chart.last.0 }}" y2="{{ chart.last.1 }}" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="chart-dates" aria-hidden="true">
+      {% for label in chart.dates %}<span>{{ label }}</span>{% endfor %}
+    </div>
+  </figure>
+  {% else %}
+  <p class="muted">{{ layout.t("disk.chart_empty") }}</p>
+  {% endif %}
+  <p class="muted small">{{ layout.t("disk.chart_note") }}</p>
+</section>
+
+{% if largest.is_empty() %}
+<section class="card">
+  <h2>{{ layout.t("disk.largest") }}</h2>
+  <p class="muted">{{ layout.t("disk.largest_empty") }}</p>
+</section>
+{% else %}
+<section class="card table-card">
+  <h2 class="table-card-title">{{ layout.t("disk.largest") }}</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("disk.col_repo") }}</th>
+        <th scope="col" class="num">{{ layout.t("disk.col_size") }}</th>
+        <th scope="col" class="num">{{ layout.t("disk.col_lfs") }}</th>
+        <th scope="col" class="num">{{ layout.t("disk.col_share") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in largest %}
+      <tr>
+        <td>
+          <a class="repo-name" href="/repos/{{ item.repo.id }}">{{ item.repo.owner }}/<strong>{{ item.repo.name }}</strong></a>
+          <div class="muted small">{{ item.repo.host }}</div>
+        </td>
+        <td class="num">{{ layout.bytes(item.repo.size_bytes) }}</td>
+        <td class="num">{% if item.repo.lfs_size_bytes > 0 %}{{ layout.bytes(item.repo.lfs_size_bytes) }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num">{{ item.share }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

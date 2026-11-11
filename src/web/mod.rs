@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod browse;
+pub mod disk;
 pub mod form;
 pub mod format;
 pub mod git_http;
@@ -128,6 +129,7 @@ pub fn router(state: AppState) -> Router {
             "/hosts/{id}/ssh/forget-host-keys",
             post(host_ssh::forget_host_keys),
         )
+        .route("/disk", get(disk::show))
         .route("/sources", get(sources::list).post(sources::create))
         .route("/sources/{id}", post(sources::update))
         .route("/sources/{id}/scan", post(sources::scan))
