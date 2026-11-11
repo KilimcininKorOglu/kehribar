@@ -13,8 +13,8 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
-use super::browse::{encode_filename, raw_response};
-use super::markdown::{self, LinkTarget};
+use super::browse::{asset_urls, encode_filename, raw_response};
+use super::markdown::{self, AssetUrls, LinkTarget};
 use super::pages::{Layout, Nav, render};
 use super::repos::PageContext;
 use crate::db::repos::{self, Repo};
@@ -66,6 +66,12 @@ fn format_of(file_name: &str) -> Option<(&str, Format)> {
     PAGE_EXTENSIONS
         .iter()
         .find_map(|(e, format)| (*e == ext).then_some((stem, *format)))
+}
+
+/// Whether `path` names a Markdown page of a wiki.
+pub fn is_markdown_page(path: &str) -> bool {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    format_of(file_name).is_some_and(|(_, format)| format == Format::Markdown)
 }
 
 /// One page of the wiki.
@@ -127,11 +133,13 @@ fn find<'a>(pages: &'a [WikiEntry], name: &str) -> Option<&'a WikiEntry> {
         })
 }
 
-/// Links inside a wiki page: other pages and files of the wiki.
+/// Links inside a wiki page: other pages and files of the wiki, and the
+/// archived copies of external images.
 struct WikiLinks {
     id: i64,
     /// Paths of the files that are not pages.
     files: HashSet<String>,
+    assets: Option<AssetUrls>,
 }
 
 impl LinkTarget for WikiLinks {
@@ -142,6 +150,10 @@ impl LinkTarget for WikiLinks {
         let last = path.rsplit('/').next().unwrap_or(path);
         let name = format_of(last).map_or(last, |(stem, _)| stem);
         page_url(self.id, name)
+    }
+
+    fn assets(&self) -> Option<AssetUrls> {
+        self.assets.clone()
     }
 }
 
@@ -319,7 +331,18 @@ async fn show(ctx: PageContext, id: i64, name: &str, optional: bool) -> Result<R
         return Err(AppError::NotFound);
     }
     let shown = match (&found, wiki.commit.as_deref()) {
-        (Some(entry), Some(commit)) => Some(load(&wiki, commit, entry, &repo, &files).await?),
+        (Some(entry), Some(commit)) => {
+            let links = WikiLinks {
+                id: repo.id,
+                files: files
+                    .iter()
+                    .filter(|file| format_of(&file.path).is_none())
+                    .map(|file| file.path.clone())
+                    .collect(),
+                assets: Some(asset_urls(&ctx, repo.id).await?),
+            };
+            Some(load(&wiki, commit, entry, repo.id, links).await?)
+        }
         _ => None,
     };
     let page = WikiPage {
@@ -339,8 +362,8 @@ async fn load(
     wiki: &Wiki,
     commit: &str,
     entry: &WikiEntry,
-    repo: &Repo,
-    files: &[read::TreeEntry],
+    repo_id: i64,
+    links: WikiLinks,
 ) -> Result<Shown, AppError> {
     let blob = read::blob(
         &wiki.git,
@@ -365,14 +388,6 @@ async fn load(
     if entry.format == Format::Text {
         return Ok(shown);
     }
-    let links = WikiLinks {
-        id: repo.id,
-        files: files
-            .iter()
-            .filter(|file| format_of(&file.path).is_none())
-            .map(|file| file.path.clone())
-            .collect(),
-    };
     let base_dir = entry
         .path
         .rsplit_once('/')
@@ -384,11 +399,11 @@ async fn load(
     match rendered {
         Ok(Ok(html)) => shown.html = Some(html),
         Ok(Err(reason)) => {
-            tracing::warn!(repo = repo.id, path = %entry.path, %reason, "wiki page not rendered");
+            tracing::warn!(repo = repo_id,path = %entry.path, %reason, "wiki page not rendered");
             shown.failed = true;
         }
         Err(err) => {
-            tracing::warn!(repo = repo.id, path = %entry.path, %err, "wiki renderer panicked");
+            tracing::warn!(repo = repo_id,path = %entry.path, %err, "wiki renderer panicked");
             shown.failed = true;
         }
     }
@@ -485,6 +500,7 @@ mod tests {
         let links = WikiLinks {
             id: 3,
             files: HashSet::from(["images/logo.png".to_owned(), "guide.pdf".to_owned()]),
+            assets: None,
         };
         assert_eq!(
             links.file_url("Other-Page", false),
@@ -510,6 +526,7 @@ mod tests {
         let links = WikiLinks {
             id: 1,
             files: HashSet::new(),
+            assets: None,
         };
         let adoc = "= Title\n\n== Part\n\nSome *bold* text.\n\n++++\n<script>alert(1)</script>\n++++\n\nlink:Other[next]\n";
         let html = to_html(Format::AsciiDoc, adoc, "", &links).unwrap();

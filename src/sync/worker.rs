@@ -85,7 +85,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         Err(message) => return defer(ctx, repo, run_id, &message).await,
     };
     if status == RepoStatus::Ok {
-        assets::refresh(ctx, &git, repo, &dir, started).await?;
+        assets::refresh(ctx, &git, repo, &dir, mirrored.has_wiki, started).await?;
     }
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);

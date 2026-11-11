@@ -13,6 +13,7 @@ use common::{TestApp, archive_source, git_in, page, source_repo, urlencode};
 use git_archive::db::assets;
 use git_archive::db::repos;
 use git_archive::db::unix_now;
+use git_archive::git::mirror;
 use git_archive::sync::assets::{AddressGuard, MAX_IMAGES};
 use sha2::Digest;
 use wiremock::matchers::{method, path, path_regex};
@@ -174,6 +175,40 @@ async fn images_are_archived_and_shown_from_the_archive() {
     let (_, repo) = page(&t, "/repos/1").await;
     assert!(repo.contains("3 resim arşivde"), "{repo}");
     assert!(!repo.contains("dış resim var"));
+}
+
+#[tokio::test]
+async fn images_of_markdown_wiki_pages_are_archived() {
+    let server = image_server().await;
+    let base = server.uri();
+    let t = app().await;
+    let source = source_repo(t.dir.path(), "source");
+    let wiki = std::path::PathBuf::from(mirror::wiki_url(&source.to_string_lossy(), false));
+    std::fs::create_dir(&wiki).unwrap();
+    git_in(&wiki, &["init", "--quiet", "--initial-branch=master"]);
+    commit(
+        &wiki,
+        "Home.mkd",
+        &format!("# Home\n\n![logo]({base}/logo.png)\n"),
+    );
+    // Only Markdown pages are read; this one names an image too.
+    commit(
+        &wiki,
+        "Notes.mediawiki",
+        &format!("[[File:{base}/diagram.svg]]\n"),
+    );
+    archive_source(&t, &source, true).await;
+
+    let logo = sha256(PNG);
+    let (_, home) = page(&t, "/repos/1/wiki").await;
+    assert!(
+        home.contains(&format!("src=\"/repos/1/asset/{logo}\" alt=\"logo\"")),
+        "{home}"
+    );
+    let archived = assets::for_repo(&t.state.pool, 1).await.unwrap();
+    let urls: Vec<_> = archived.iter().map(|asset| asset.url.as_str()).collect();
+    assert_eq!(urls, [format!("{base}/logo.png")]);
+    assert_eq!(requests_to(&server, "/diagram.svg").await, 0);
 }
 
 #[tokio::test]

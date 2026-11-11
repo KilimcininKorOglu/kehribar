@@ -202,9 +202,9 @@ cp <oid> name.git/lfs/objects/${oid:0:2}/${oid:2:2}/<oid>
 
 ## Markdown images
 
-After every successful sync, git-archive reads the Markdown files (`.md`, `.markdown`) of the default branch and downloads the external images they show: Markdown images and HTML `<img>` elements with an `http` or `https` URL. A rendered README and the rendered view of a Markdown file then show the archived copy from `/repos/<id>/asset/<sha256>` instead of the external address; the "Source" switch of a Markdown file shows its text.
+After every successful sync, git-archive reads the Markdown files (`.md`, `.markdown`) of the default branch, and the Markdown pages of the archived wiki, and downloads the external images they show: Markdown images and HTML `<img>` elements with an `http` or `https` URL. A rendered README, the rendered view of a Markdown file and a Markdown wiki page then show the archived copy from `/repos/<id>/asset/<sha256>` instead of the external address; the "Source" switch of a Markdown file shows its text. Images of AsciiDoc, reStructuredText and other wiki pages are not downloaded and stay external.
 
-- At most 200 images per repository, in the order the files name them. The repository page says when the files name more.
+- At most 200 images per repository and its wiki together, in the order the files name them, repository files first. The repository page says when the files name more.
 - At most 5 MB per image, and only answers with an `image/*` content type. A request may take 20 seconds and follow 3 redirects.
 - An archived image is downloaded again after 24 hours. A failed download keeps the copy the archive has and does not fail the sync; it is written to the log.
 - Images go only to public addresses. A host name is resolved first, and the request is refused when any of its addresses is loopback, private, link-local, shared (100.64.0.0/10), multicast, documentation or another reserved range; the connection then goes to the checked address. Every redirect is checked the same way, so a redirect to an internal address is refused too. Proxy settings of the environment are not used for these requests.

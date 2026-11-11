@@ -204,7 +204,7 @@ impl LinkTarget for RepoView {
 }
 
 /// The archived images of a repository: image URL to local URL.
-async fn asset_urls(ctx: &PageContext, id: i64) -> Result<AssetUrls, AppError> {
+pub(super) async fn asset_urls(ctx: &PageContext, id: i64) -> Result<AssetUrls, AppError> {
     let rows = assets::for_repo(&ctx.state.pool, id).await?;
     Ok(Arc::new(
         rows.into_iter()

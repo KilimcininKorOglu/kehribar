@@ -1,5 +1,6 @@
 //! Archives the external images that the Markdown files of a repository
-//! show, so the README keeps its pictures when their server goes away.
+//! and the Markdown pages of its wiki show, so the README keeps its
+//! pictures when their server goes away.
 //!
 //! The files come from servers the archived content names, so every
 //! request is checked: only `http(s)`, only public addresses, and the
@@ -22,8 +23,8 @@ use super::SyncContext;
 use crate::config::Config;
 use crate::db::assets::{self, Asset, Check};
 use crate::db::repos::Repo;
-use crate::git::{Git, read};
-use crate::web::markdown;
+use crate::git::{Git, mirror, read};
+use crate::web::{markdown, wiki};
 
 /// Images archived per repository at most; the repository page says when
 /// its files name more.
@@ -272,23 +273,43 @@ async fn store(config: &Config, image: &Image) -> std::io::Result<String> {
     Ok(hash)
 }
 
-/// The external image URLs of the Markdown files at the archive's `HEAD`.
-async fn collect(git: &Git, dir: &Path) -> Result<Vec<String>, String> {
+/// External image URLs in the order they were found, without repeats.
+#[derive(Default)]
+struct Found {
+    urls: Vec<String>,
+    seen: HashSet<String>,
+}
+
+/// The external image URLs of the Markdown files at the archive's `HEAD`,
+/// then of the Markdown pages of its wiki when `with_wiki`.
+async fn collect(git: &Git, dir: &Path, with_wiki: bool) -> Result<Vec<String>, String> {
+    let mut found = Found::default();
+    collect_from(git, dir, markdown::is_markdown, &mut found).await?;
+    if with_wiki {
+        let wiki = mirror::wiki_dir(dir);
+        collect_from(git, &wiki, wiki::is_markdown_page, &mut found).await?;
+    }
+    Ok(found.urls)
+}
+
+/// Adds the image URLs of the files at `HEAD` of `dir` that `is_page`
+/// accepts.
+async fn collect_from(
+    git: &Git,
+    dir: &Path,
+    is_page: fn(&str) -> bool,
+    found: &mut Found,
+) -> Result<(), String> {
     let Some(commit) = read::resolve_commit(git, dir, "HEAD")
         .await
         .map_err(|err| err.message)?
     else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let files = read::files(git, dir, &commit)
         .await
         .map_err(|err| err.message)?;
-    let mut urls: Vec<String> = Vec::new();
-    let mut seen = HashSet::new();
-    for file in files
-        .iter()
-        .filter(|f| !f.symlink && markdown::is_markdown(&f.path))
-    {
+    for file in files.iter().filter(|f| !f.symlink && is_page(&f.path)) {
         let blob = read::blob(git, dir, &commit, &file.path, read::MAX_BLOB_BYTES)
             .await
             .map_err(|err| err.message)?;
@@ -297,25 +318,26 @@ async fn collect(git: &Git, dir: &Path) -> Result<Vec<String>, String> {
         }
         let text = String::from_utf8_lossy(&blob.data);
         for url in markdown::image_urls(&text) {
-            if seen.insert(url.clone()) {
-                urls.push(url);
+            if found.seen.insert(url.clone()) {
+                found.urls.push(url);
             }
         }
     }
-    Ok(urls)
+    Ok(())
 }
 
-/// Downloads the images of a repository that have no copy or an old one,
-/// after a successful sync. A failed download keeps the copy it had and
-/// does not fail the sync; it is logged.
+/// Downloads the images of a repository, and of its wiki when `with_wiki`,
+/// that have no copy or an old one, after a successful sync. A failed
+/// download keeps the copy it had and does not fail the sync; it is logged.
 pub async fn refresh(
     ctx: &SyncContext,
     git: &Git,
     repo: &Repo,
     dir: &Path,
+    with_wiki: bool,
     now: i64,
 ) -> sqlx::Result<()> {
-    let urls = match collect(git, dir).await {
+    let urls = match collect(git, dir, with_wiki).await {
         Ok(urls) => urls,
         Err(err) => {
             tracing::warn!(repo = %repo.url, %err, "cannot list the images of the Markdown files");
