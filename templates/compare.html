@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("compare.title") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
+<div class="page-head">
+  <h1 class="repo-title"><a class="plain" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a></h1>
+</div>
+{% include "repo_tabs.html" %}
+
+<section class="card">
+  <p class="muted small compare-help">{{ layout.t("compare.help") }}</p>
+  <form class="compare-form" method="get" action="/repos/{{ repo.id }}/compare">
+    <label class="field">
+      <span>{{ layout.t("compare.base") }}</span>
+      <input name="base" value="{{ base }}" list="rev-names" spellcheck="false" autocomplete="off" required>
+    </label>
+    <span class="compare-arrow" aria-hidden="true">…</span>
+    <label class="field">
+      <span>{{ layout.t("compare.head") }}</span>
+      <input name="head" value="{{ head }}" list="rev-names" spellcheck="false" autocomplete="off" required>
+    </label>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">{{ layout.t("compare.submit") }}</button>
+      {% if !head.is_empty() %}<a class="btn" href="{{ swap_url() }}">{{ layout.t("compare.swap") }}</a>{% endif %}
+    </div>
+    <datalist id="rev-names">{% for name in names %}<option value="{{ name }}">{% endfor %}</datalist>
+  </form>
+</section>
+
+{% if !unknown.is_empty() %}
+<p class="alert alert-error" role="alert">{{ unknown_text() }}</p>
+{% endif %}
+
+{% if let Some(result) = result %}
+{% if result.same %}
+<section class="card"><p class="muted">{{ layout.t("compare.same") }}</p></section>
+{% else %}
+<section class="card table-card">
+  <h2 class="table-card-title">{{ commits_text(result) }}</h2>
+  {% if result.is_cut() %}<p class="muted small table-card-note">{{ cut_text(result) }}</p>{% endif %}
+  {% if result.commits.is_empty() %}
+  <p class="muted table-card-note">{{ layout.t("compare.no_commits") }}</p>
+  {% else %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("browse.col_message") }}</th>
+        <th scope="col">{{ layout.t("browse.col_author") }}</th>
+        <th scope="col">{{ layout.t("browse.col_date") }}</th>
+        <th scope="col">{{ layout.t("browse.col_commit") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for commit in result.commits %}
+      <tr>
+        <td class="commit-subject"><a href="/repos/{{ repo.id }}/commit/{{ commit.sha }}">{{ commit.subject }}</a></td>
+        <td class="small">{{ commit.author }}</td>
+        <td class="small"><time title="{{ layout.absolute(commit.time) }}">{{ layout.ago(commit.time) }}</time></td>
+        <td><a class="mono small" href="/repos/{{ repo.id }}/commit/{{ commit.sha }}">{{ short(commit.sha) }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+<p class="muted small compare-files">{{ files_text(result) }}</p>
+{% let files = result.files.as_slice() %}
+{% let diff_cut = result.diff_cut %}
+{% include "diff_files.html" %}
+{% endif %}
+{% endif %}
+{% endblock %}

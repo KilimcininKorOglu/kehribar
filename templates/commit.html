@@ -19,21 +19,8 @@
 </section>
 
 <p class="muted small">{{ files_text() }}</p>
-{% if diff_cut %}<p class="alert alert-error" role="status">{{ layout.t("browse.diff_cut") }}</p>{% endif %}
 {% if files.is_empty() %}
 <section class="card"><p class="muted">{{ layout.t("browse.no_diff") }}</p></section>
 {% endif %}
-{% for file in files %}
-<section class="card file-card diff-file">
-  <div class="file-head">
-    <span class="mono small">{% if file.change == FileChange::Renamed %}{{ file.old_path }} → {% endif %}<strong>{{ file.path() }}</strong></span>
-    <span class="small"><span class="badge">{{ change_label(file) }}</span> <span class="diff-stat-add">+{{ file.added }}</span> <span class="diff-stat-del">−{{ file.removed }}</span></span>
-  </div>
-  {% if file.binary %}
-  <p class="file-note muted">{{ layout.t("browse.binary_diff") }}</p>
-  {% else if !file.lines.is_empty() %}
-  <pre class="diff"><code>{% for line in file.lines %}<span class="dl dl-{{ line.kind.code() }}">{{ line.text }}</span>{% endfor %}</code></pre>
-  {% endif %}
-</section>
-{% endfor %}
+{% include "diff_files.html" %}
 {% endblock %}

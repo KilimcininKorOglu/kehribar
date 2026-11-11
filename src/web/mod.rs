@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod browse;
+pub mod compare;
 pub mod disk;
 pub mod form;
 pub mod format;
@@ -119,6 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/commit/{sha}", get(browse::commit))
         .route("/repos/{id}/refs", get(browse::refs))
         .route("/repos/{id}/history", get(history::show))
+        .route("/repos/{id}/compare", get(compare::show))
         .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))

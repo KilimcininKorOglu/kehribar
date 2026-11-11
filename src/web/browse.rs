@@ -792,18 +792,9 @@ impl CommitPage {
         let count = i64::try_from(self.files.len()).unwrap_or(i64::MAX);
         self.layout.tf_number("browse.files_changed", &count)
     }
-
-    fn change_label(&self, file: &FileDiff) -> &str {
-        self.layout.t(match file.change {
-            FileChange::Added => "change.added",
-            FileChange::Deleted => "change.deleted",
-            FileChange::Renamed => "change.renamed",
-            FileChange::Modified => "change.modified",
-        })
-    }
 }
 
-fn is_object_id(text: &str) -> bool {
+pub fn is_object_id(text: &str) -> bool {
     (4..=64).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 

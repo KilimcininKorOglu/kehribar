@@ -99,6 +99,20 @@ col_time = "Time"
 col_event = "Change"
 col_commits = "Commits"
 
+[compare]
+title = "Compare"
+help = "Lists the commits of the second revision that the first one lacks, and the changes they make. A revision is a branch, a tag or a commit."
+base = "From"
+head = "To"
+submit = "Compare"
+swap = "Swap"
+unknown = "The archive has no commit with this name: {revs}"
+same = "Both revisions point to the same commit. There is no difference."
+commits = "{n} commits"
+commits_one = "{n} commit"
+commits_cut = "Only the newest {shown} are listed."
+no_commits = "The second revision has no commit that the first one lacks."
+
 [event]
 baseline = "Recording started"
 created = "Created"

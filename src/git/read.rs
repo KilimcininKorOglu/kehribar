@@ -346,6 +346,49 @@ pub async fn diff(git: &Git, dir: &Path, sha: &str) -> Result<(Vec<FileDiff>, bo
     Ok((parse_diff(&String::from_utf8_lossy(&out)), cut))
 }
 
+/// The changes of `head` since its merge base with `base` (what `head`
+/// adds), or against `base` itself when the two share no history; and
+/// whether the diff was cut at [`MAX_DIFF_BYTES`]. Both are commit ids.
+pub async fn compare_diff(
+    git: &Git,
+    dir: &Path,
+    base: &str,
+    head: &str,
+) -> Result<(Vec<FileDiff>, bool), GitError> {
+    let from = merge_base(git, dir, base, head)
+        .await?
+        .unwrap_or_else(|| base.to_owned());
+    let args = [
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--patch",
+        "--find-renames",
+        "--no-color",
+        "--no-ext-diff",
+        "--end-of-options",
+        &from,
+        head,
+        "--",
+    ];
+    let (out, cut) = git.run_capped(dir, &args, MAX_DIFF_BYTES).await?;
+    Ok((parse_diff(&String::from_utf8_lossy(&out)), cut))
+}
+
+/// The best common ancestor of two commits; `None` when they share none.
+async fn merge_base(git: &Git, dir: &Path, a: &str, b: &str) -> Result<Option<String>, GitError> {
+    // merge-base exits with 1 and no output when there is no common ancestor.
+    run_or_missing(git, dir, &["merge-base", "--end-of-options", a, b], 1).await
+}
+
+/// The number of commits in `head` that `base` does not have.
+pub async fn count_ahead(git: &Git, dir: &Path, base: &str, head: &str) -> Result<i64, GitError> {
+    let range = format!("{base}..{head}");
+    let args = ["rev-list", "--count", "--end-of-options", &range, "--"];
+    let out = git.run(Some(dir), args, None).await?;
+    Ok(String::from_utf8_lossy(&out).trim().parse().unwrap_or(0))
+}
+
 pub fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut in_hunks = false;

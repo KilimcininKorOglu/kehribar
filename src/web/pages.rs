@@ -17,6 +17,7 @@ use crate::db::repos::RepoStatus;
 use crate::db::sync_runs::RunOutcome;
 use crate::db::unix_now;
 use crate::error::AppError;
+use crate::git::read::{FileChange, FileDiff};
 use crate::i18n::{Lang, Tr};
 
 const APP_CSS: &str = include_str!("../../static/app.css");
@@ -107,6 +108,16 @@ impl Layout {
             RunOutcome::Unreachable => self.status_label(&RepoStatus::Unreachable),
             RunOutcome::Deferred => self.t("status.deferred"),
         }
+    }
+
+    /// The label of a file change in a diff.
+    pub fn change_label(&self, file: &FileDiff) -> &str {
+        self.t(match file.change {
+            FileChange::Added => "change.added",
+            FileChange::Deleted => "change.deleted",
+            FileChange::Renamed => "change.renamed",
+            FileChange::Modified => "change.modified",
+        })
     }
 
     /// The label of a ref history event.

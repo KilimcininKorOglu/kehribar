@@ -98,6 +98,19 @@ col_time = "Zaman"
 col_event = "Değişiklik"
 col_commits = "Commit'ler"
 
+[compare]
+title = "Karşılaştır"
+help = "İkinci revizyonda olup birincide olmayan commit'leri ve getirdikleri değişiklikleri listeler. Revizyon bir branch, tag veya commit olabilir."
+base = "Şundan"
+head = "Şuna"
+submit = "Karşılaştır"
+swap = "Yer değiştir"
+unknown = "Arşivde bu adla bir commit yok: {revs}"
+same = "İki revizyon da aynı commit'i gösteriyor. Fark yok."
+commits = "{n} commit"
+commits_cut = "Yalnız en yeni {shown} commit listeleniyor."
+no_commits = "İkinci revizyonda birincide olmayan commit yok."
+
 [event]
 baseline = "Kayıt başlangıcı"
 created = "Oluşturuldu"
