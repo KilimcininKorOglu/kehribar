@@ -23,6 +23,9 @@ use crate::settings::SyncSettings;
 struct Mirrored {
     report: SyncReport,
     has_wiki: bool,
+    /// The failure that ended the sync; after a fetch, `report` still holds
+    /// what the fetch changed.
+    failure: Option<Failure>,
 }
 
 /// A failed sync: the status to show and the message.
@@ -82,7 +85,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     };
     let (status, message, mirrored) = match sync_and_maintain(ctx, &job, settings).await? {
         Ok(done) => done,
-        Err(message) => return defer(ctx, repo, run_id, &message).await,
+        Err((message, report)) => return defer(ctx, repo, run_id, &message, &report).await,
     };
     if status == RepoStatus::Ok {
         assets::refresh(ctx, &git, repo, &dir, mirrored.has_wiki, started).await?;
@@ -108,11 +111,15 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     let run = RunResult {
         finished_at: finished,
         outcome: status.into(),
-        refs_changed: i64::try_from(mirrored.report.refs_changed).unwrap_or(i64::MAX),
-        refs_rescued: i64::try_from(mirrored.report.refs_rescued).unwrap_or(i64::MAX),
+        refs_changed: count(mirrored.report.refs_changed),
+        refs_rescued: count(mirrored.report.refs_rescued),
         message: message.as_deref(),
     };
     sync_runs::finish(&ctx.pool, run_id, &run).await
+}
+
+fn count(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
 }
 
 /// Frees a repository whose sync stopped with `message` before it recorded
@@ -131,8 +138,15 @@ pub async fn release(ctx: &SyncContext, repo: &Repo, settings: SyncSettings, mes
 
 /// Records a sync that a rate limit stopped: the repository keeps its state
 /// and tries again after [`RATE_LIMIT_WAIT_SECONDS`], without a notification;
-/// git does not pass on the server's own retry time.
-async fn defer(ctx: &SyncContext, repo: &Repo, run_id: i64, message: &str) -> sqlx::Result<()> {
+/// git does not pass on the server's own retry time. `report` holds what a
+/// fetch before the rate limit changed.
+async fn defer(
+    ctx: &SyncContext,
+    repo: &Repo,
+    run_id: i64,
+    message: &str,
+    report: &SyncReport,
+) -> sqlx::Result<()> {
     let finished = unix_now();
     tracing::info!(repo = %repo.url, %message, "sync postponed by a rate limit");
     repos::defer(
@@ -145,8 +159,8 @@ async fn defer(ctx: &SyncContext, repo: &Repo, run_id: i64, message: &str) -> sq
     let run = RunResult {
         finished_at: finished,
         outcome: RunOutcome::Deferred,
-        refs_changed: 0,
-        refs_rescued: 0,
+        refs_changed: count(report.refs_changed),
+        refs_rescued: count(report.refs_rescued),
         message: Some(message),
     };
     sync_runs::finish(&ctx.pool, run_id, &run).await
@@ -173,24 +187,26 @@ async fn report_change(ctx: &SyncContext, repo: &Repo, status: RepoStatus, messa
 type Synced = (RepoStatus, Option<String>, Mirrored);
 
 /// Fetches the repository, then runs the maintenance that is due. A failed
-/// integrity check fails the sync, but keeps the fetch report. The inner
-/// `Err` is the message of a sync that a rate limit stopped.
+/// wiki, LFS or integrity step fails the sync, but keeps the fetch report.
+/// The inner `Err` is the message and the fetch report of a sync that a
+/// rate limit stopped.
 async fn sync_and_maintain(
     ctx: &SyncContext,
     job: &Job<'_>,
     settings: SyncSettings,
-) -> sqlx::Result<Result<Synced, String>> {
-    let mirrored = match mirror_repo(ctx, job).await {
-        Ok(mirrored) => mirrored,
-        Err(failure) if failure.deferred => return Ok(Err(failure.message)),
-        Err(failure) => {
-            return Ok(Ok((
-                failure.status,
-                Some(failure.message),
-                Mirrored::default(),
-            )));
+) -> sqlx::Result<Result<Synced, (String, SyncReport)>> {
+    let mut mirrored = mirror_repo(ctx, job)
+        .await
+        .unwrap_or_else(|failure| Mirrored {
+            failure: Some(failure),
+            ..Mirrored::default()
+        });
+    if let Some(failure) = mirrored.failure.take() {
+        if failure.deferred {
+            return Ok(Err((failure.message, mirrored.report)));
         }
-    };
+        return Ok(Ok((failure.status, Some(failure.message), mirrored)));
+    }
     let upkeep = maintain(job, settings).await;
     upkeep.record(&ctx.pool, job.repo.id, job.now).await?;
     Ok(Ok(match upkeep.failure() {
@@ -311,17 +327,30 @@ async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failu
     ref_log::record(&ctx.pool, job.git, job.dir, &exclude, &fetch)
         .await
         .map_err(|err| Failure::error(format!("cannot record the ref history: {err}")))?;
-    let has_wiki = if job.repo.wiki_enabled {
-        mirror_wiki(job, access).await?
-    } else {
-        false
-    };
-    if job.repo.lfs_enabled {
-        lfs::fetch(job.git, job.dir, access)
-            .await
-            .map_err(|err| part_failure("LFS", err))?;
+    let (has_wiki, failure) = fetch_parts(job, access).await;
+    Ok(Mirrored {
+        report,
+        has_wiki,
+        failure,
+    })
+}
+
+/// Fetches the wiki and the LFS objects when they are on. Returns whether
+/// the wiki exists and the failure that stopped the fetch.
+async fn fetch_parts(job: &Job<'_>, access: Option<&Access>) -> (bool, Option<Failure>) {
+    let mut has_wiki = false;
+    if job.repo.wiki_enabled {
+        match mirror_wiki(job, access).await {
+            Ok(found) => has_wiki = found,
+            Err(failure) => return (false, Some(failure)),
+        }
     }
-    Ok(Mirrored { report, has_wiki })
+    if job.repo.lfs_enabled
+        && let Err(err) = lfs::fetch(job.git, job.dir, access).await
+    {
+        return (has_wiki, Some(part_failure("LFS", err)));
+    }
+    (has_wiki, None)
 }
 
 /// A failure of the wiki or of the LFS objects: the repository itself was

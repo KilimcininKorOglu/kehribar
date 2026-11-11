@@ -270,6 +270,41 @@ async fn a_sync_that_cannot_record_its_result_frees_the_repository() {
 }
 
 #[tokio::test]
+async fn a_failed_wiki_keeps_the_report_of_the_fetch() {
+    let s = setup().await;
+    let source = common::source_repo(s.dir.path(), "project");
+    // A wiki whose branch points to an object it does not have.
+    let wiki = s.dir.path().join(git_archive::git::mirror::wiki_url(
+        &source.to_string_lossy(),
+        false,
+    ));
+    common::git_in(
+        s.dir.path(),
+        &["init", "--quiet", "--bare", &wiki.to_string_lossy()],
+    );
+    std::fs::write(
+        wiki.join("refs/heads/main"),
+        format!("{}\n", "1".repeat(40)),
+    )
+    .unwrap();
+    let id = add_repo(&s.ctx.pool, &source, "project", None).await;
+
+    run_tick(&s.scheduler).await;
+
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Error);
+    assert!(
+        repo.last_error.clone().unwrap().starts_with("wiki: "),
+        "{:?}",
+        repo.last_error
+    );
+    assert_eq!(repo.default_branch.as_deref(), Some("main"));
+    let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 10).await.unwrap();
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Error));
+    assert_eq!(runs[0].refs_changed, 1);
+}
+
+#[tokio::test]
 async fn claimed_repository_is_not_started_twice() {
     let s = setup().await;
     let source = common::source_repo(s.dir.path(), "project");
