@@ -407,6 +407,9 @@ pub(super) struct AddSettings<'a> {
     pub wiki: bool,
     pub username: Option<&'a str>,
     pub token_enc: Option<&'a [u8]>,
+    /// Settings written in the same transaction, so that no sync can start
+    /// before them.
+    pub checked: Option<&'a CheckedSettings>,
 }
 
 /// Adds the repository at `url` to the archive, due for an immediate sync.
@@ -430,9 +433,14 @@ pub(super) async fn add_repo(
         interval_minutes: settings.interval,
         wiki_enabled: settings.wiki,
     };
-    let Some(id) = repos::insert(&state.pool, &repo, unix_now()).await? else {
+    let mut tx = state.pool.begin().await?;
+    let Some(id) = repos::insert(&mut *tx, &repo, unix_now()).await? else {
         return Ok(Added::Exists);
     };
+    if let Some(checked) = settings.checked {
+        repos::update_settings(&mut *tx, id, checked.as_settings()).await?;
+    }
+    tx.commit().await?;
     tracing::info!(url = %location.url, "repository added");
     Ok(Added::Yes(id))
 }
@@ -472,6 +480,7 @@ pub async fn create(ctx: PageContext, Form(form): Form<NewRepoForm>) -> Result<R
         wiki,
         username: optional_text(form.username.as_deref()),
         token_enc: token_enc.as_deref(),
+        checked: None,
     };
     match add_repo(&ctx.state, &form.url, &settings).await? {
         Added::Yes(id) => {
@@ -509,6 +518,7 @@ pub async fn create_bulk(
         wiki: page.wiki,
         username: None,
         token_enc: None,
+        checked: None,
     };
     for url in form.urls.lines().map(str::trim).filter(|l| !l.is_empty()) {
         let outcome = add_repo(&ctx.state, url, &settings).await?;

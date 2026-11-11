@@ -182,6 +182,7 @@ pub async fn create(
         wiki: body.wiki_enabled,
         username: optional_text(body.username.as_deref()),
         token_enc: token_enc.as_deref(),
+        checked: Some(&settings),
     };
     let id = match add_repo(&state, &body.url, &add).await? {
         Added::Yes(id) => id,
@@ -200,7 +201,6 @@ pub async fn create(
             ));
         }
     };
-    repos::update_settings(&state.pool, id, settings.as_settings()).await?;
     state.scheduler.wake();
     let location = [(header::LOCATION, format!("/api/v1/repos/{id}"))];
     Ok((StatusCode::CREATED, location, view(&state, id).await?))
