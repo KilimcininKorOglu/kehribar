@@ -76,7 +76,7 @@ impl SourceFields {
             || !self.exclude_patterns.trim().is_empty()
     }
 
-    pub fn kinds(&self) -> [SourceKind; 2] {
+    pub fn kinds(&self) -> [SourceKind; SourceKind::ALL.len()] {
         SourceKind::ALL
     }
 
@@ -106,6 +106,7 @@ impl ListPage {
         self.layout.t(match kind {
             SourceKind::User => "sources.kind_user",
             SourceKind::Org => "sources.kind_org",
+            SourceKind::Starred => "sources.kind_starred",
         })
     }
 
@@ -199,6 +200,9 @@ async fn validate(
     let Some(kind) = SourceKind::parse(&form.kind) else {
         return Ok(Err("sources.invalid_kind"));
     };
+    if !providers::supports(host.provider, kind) {
+        return Ok(Err("sources.kind_unsupported"));
+    }
     // Only GitLab groups nest.
     let nested = host.provider == Provider::Gitlab && kind == SourceKind::Org;
     let Some(name) = repo_url::parse_owner(&form.name, nested) else {

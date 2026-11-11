@@ -393,6 +393,19 @@ async fn invalid_source_forms_are_rejected() {
     )
     .await
     .unwrap();
+    let bitbucket = hosts::insert(
+        &t.state.pool,
+        &HostInput {
+            host: "bitbucket.org",
+            provider: Provider::Bitbucket,
+            api_base_url: None,
+            username: None,
+            token_enc: None,
+        },
+        unix_now(),
+    )
+    .await
+    .unwrap();
     let cases = [
         (
             format!("host_id={generic}&kind=org&name=octo"),
@@ -405,6 +418,10 @@ async fn invalid_source_forms_are_rejected() {
         (
             format!("host_id={github}&kind=team&name=octo"),
             "Listeden bir tür seçin.",
+        ),
+        (
+            format!("host_id={bitbucket}&kind=starred&name=alice"),
+            "Yıldızlananlar yalnız GitHub, GitLab ve Forgejo",
         ),
         (
             format!("host_id={github}&kind=org&name=a%2Fb"),

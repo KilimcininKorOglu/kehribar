@@ -154,14 +154,16 @@ delete_help = "The archived repositories stay. After this, repositories without 
 
 [sources]
 title = "Sources"
-intro = "A source is a user or an organization on a host. Its repositories are imported, and scheduled scans add new ones. A repository that disappears from the source stays in the archive."
+intro = "A source is a user or an organization on a host, or the repositories a user starred. Its repositories are imported, and scheduled scans add new ones. A repository that disappears from the source stays in the archive."
 empty = "No source yet."
 add = "Import a user or an organization"
 no_hosts = "Importing needs a host of the type GitHub, GitLab, Forgejo / Gitea or Bitbucket."
 name = "User, organization or workspace name"
-name_help = "As it appears in the URL, for example octo-org. A GitLab group can include subgroups: group/subgroup."
+name_help = "As it appears in the URL, for example octo-org. A GitLab group can include subgroups: group/subgroup. For \"Starred by user\", enter the user name."
 kind_user = "User"
 kind_org = "Organization"
+kind_starred = "Starred by user"
+kind_unsupported = "This host type cannot list the selected source type. Starred repositories exist only on GitHub, GitLab and Forgejo / Gitea hosts."
 auto_add = "Add new repositories"
 auto_add_help = "Scan this source on the global interval and add new repositories automatically"
 include_forks = "Forks"

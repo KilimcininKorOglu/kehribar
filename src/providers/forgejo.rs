@@ -1,4 +1,5 @@
-//! Forgejo and Gitea: `GET /users/{name}/repos` and `GET /orgs/{name}/repos`.
+//! Forgejo and Gitea: `GET /users/{name}/repos`, `GET /orgs/{name}/repos`
+//! and `GET /users/{name}/starred`.
 
 use serde::Deserialize;
 
@@ -21,11 +22,11 @@ pub async fn list(
     kind: SourceKind,
     name: &str,
 ) -> Result<Vec<RemoteRepo>, ProviderError> {
-    let owner = match kind {
-        SourceKind::Org => "orgs",
-        SourceKind::User => "users",
+    let url = match kind {
+        SourceKind::Org => api.url(&["orgs", name, "repos"])?,
+        SourceKind::User => api.url(&["users", name, "repos"])?,
+        SourceKind::Starred => api.url(&["users", name, "starred"])?,
     };
-    let url = api.url(&[owner, name, "repos"])?;
     let repos: Vec<Repo> = api.paged(url, "limit", LIMIT).await?;
     Ok(repos
         .into_iter()

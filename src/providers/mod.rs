@@ -1,6 +1,6 @@
-//! Lists the repositories of a user or an organization through the REST
-//! API of a hosting provider: GitHub, GitLab, Forgejo/Gitea or Bitbucket
-//! Cloud. Every list is read to its last page.
+//! Lists the repositories of a user or an organization, or the ones a user
+//! starred, through the REST API of a hosting provider: GitHub, GitLab,
+//! Forgejo/Gitea or Bitbucket Cloud. Every list is read to its last page.
 
 mod bitbucket;
 mod forgejo;
@@ -36,6 +36,11 @@ pub struct RemoteRepo {
 pub enum ProviderError {
     #[error("the {0} provider has no repository list API")]
     Unsupported(&'static str),
+    #[error("the {provider} provider has no {kind} list")]
+    KindUnsupported {
+        provider: &'static str,
+        kind: &'static str,
+    },
     #[error("invalid API URL: {0}")]
     BadUrl(String),
     #[error("{url} answered HTTP {status}")]
@@ -170,6 +175,17 @@ pub fn can_list(provider: Provider) -> bool {
     provider != Provider::Generic
 }
 
+/// Whether the provider can list sources of `kind`.
+pub fn supports(provider: Provider, kind: SourceKind) -> bool {
+    match kind {
+        SourceKind::User | SourceKind::Org => can_list(provider),
+        SourceKind::Starred => matches!(
+            provider,
+            Provider::Github | Provider::Gitlab | Provider::Forgejo
+        ),
+    }
+}
+
 /// Lists every repository of `name` on `host`.
 pub async fn list_repos(
     host: &Host,
@@ -177,6 +193,13 @@ pub async fn list_repos(
     kind: SourceKind,
     name: &str,
 ) -> Result<Vec<RemoteRepo>, ProviderError> {
+    // A provider without any list keeps its own error below.
+    if can_list(host.provider) && !supports(host.provider, kind) {
+        return Err(ProviderError::KindUnsupported {
+            provider: host.provider.code(),
+            kind: kind.code(),
+        });
+    }
     let api = connect(host, credentials)?;
     match host.provider {
         Provider::Github => github::list(&api, kind, name).await,

@@ -154,14 +154,16 @@ delete_help = "Arşivdeki repolar silinmez. Kendi token'ı olmayan repolar bunda
 
 [sources]
 title = "Kaynaklar"
-intro = "Kaynak, bir sunucudaki kullanıcı veya organizasyondur. Kaynağın tüm repoları arşive eklenir, düzenli taramalar da sonradan açılan repoları ekler. Kaynaktan kaldırılan bir repo arşivden silinmez."
+intro = "Kaynak, bir sunucudaki kullanıcı, organizasyon ya da bir kullanıcının yıldızladığı repolardır. Kaynağın tüm repoları arşive eklenir, düzenli taramalar da sonradan açılan repoları ekler. Kaynaktan kaldırılan bir repo arşivden silinmez."
 empty = "Henüz kaynak eklenmedi."
 add = "Kullanıcı veya organizasyon ekle"
 no_hosts = "Kaynak eklemek için önce GitHub, GitLab, Forgejo / Gitea veya Bitbucket türünde bir sunucu ekleyin."
 name = "Kullanıcı, organizasyon veya workspace adı"
-name_help = "URL'de nasıl yazıyorsa öyle girin, örneğin octo-org. GitLab'de alt grubu grup/altgrup biçiminde yazabilirsiniz."
+name_help = "URL'de nasıl yazıyorsa öyle girin, örneğin octo-org. GitLab'de alt grubu grup/altgrup biçiminde yazabilirsiniz. \"Yıldızladıkları\" türünde kullanıcının adını girin."
 kind_user = "Kullanıcı"
 kind_org = "Organizasyon"
+kind_starred = "Yıldızladıkları"
+kind_unsupported = "Bu sunucu türü seçtiğiniz kaynak türünü listeleyemiyor. Yıldızlananlar yalnız GitHub, GitLab ve Forgejo / Gitea sunucularında var."
 auto_add = "Yeni repoları ekle"
 auto_add_help = "Bu kaynağı düzenli olarak tara ve yeni açılan repoları arşive ekle"
 include_forks = "Fork'lar"

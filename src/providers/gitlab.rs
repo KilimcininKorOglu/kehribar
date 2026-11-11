@@ -1,5 +1,5 @@
-//! GitLab: `GET /groups/{path}/projects` with subgroups, and
-//! `GET /users/{name}/projects`.
+//! GitLab: `GET /groups/{path}/projects` with subgroups,
+//! `GET /users/{name}/projects` and `GET /users/{name}/starred_projects`.
 
 use serde::Deserialize;
 use serde::de::IgnoredAny;
@@ -26,6 +26,7 @@ pub async fn list(
     let mut url = match kind {
         SourceKind::Org => api.url(&["groups", name, "projects"])?,
         SourceKind::User => api.url(&["users", name, "projects"])?,
+        SourceKind::Starred => api.url(&["users", name, "starred_projects"])?,
     };
     if kind == SourceKind::Org {
         url.query_pairs_mut()

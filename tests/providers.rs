@@ -108,6 +108,102 @@ async fn github_lists_private_repositories_of_the_token_owner() {
 }
 
 #[tokio::test]
+async fn starred_lists_page_on_every_provider_that_has_them() {
+    let server = MockServer::start().await;
+    // GitHub, anonymous: the public list, paged by 100.
+    mount_page(
+        &server,
+        "/users/alice/starred",
+        "1",
+        items(0, 100, github_repo),
+    )
+    .await;
+    mount_page(
+        &server,
+        "/users/alice/starred",
+        "2",
+        items(100, 1, github_repo),
+    )
+    .await;
+    let github = host(Provider::Github, server.uri());
+    let repos = list_repos(&github, None, SourceKind::Starred, "alice")
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 101);
+
+    // GitLab: the user name works in place of the ID.
+    let project =
+        |n: usize| json!({ "http_url_to_repo": format!("https://git.example/x/p{n}.git") });
+    mount_page(
+        &server,
+        "/api/v4/users/alice/starred_projects",
+        "1",
+        items(0, 2, project),
+    )
+    .await;
+    let gitlab = host(Provider::Gitlab, format!("{}/api/v4", server.uri()));
+    let repos = list_repos(&gitlab, None, SourceKind::Starred, "alice")
+        .await
+        .unwrap();
+    assert_eq!(
+        urls(&repos),
+        [
+            "https://git.example/x/p0.git",
+            "https://git.example/x/p1.git"
+        ]
+    );
+
+    // Forgejo / Gitea.
+    mount_page(
+        &server,
+        "/api/v1/users/alice/starred",
+        "1",
+        items(0, 1, github_repo),
+    )
+    .await;
+    let forgejo = host(Provider::Forgejo, format!("{}/api/v1", server.uri()));
+    let repos = list_repos(&forgejo, None, SourceKind::Starred, "alice")
+        .await
+        .unwrap();
+    assert_eq!(urls(&repos), ["https://git.example/org/r0.git"]);
+
+    // Bitbucket has no such list; nothing is requested.
+    let before = server.received_requests().await.unwrap().len();
+    let bitbucket = host(Provider::Bitbucket, server.uri());
+    let err = list_repos(&bitbucket, None, SourceKind::Starred, "alice")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the bitbucket provider has no starred list"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn github_lists_the_token_owners_private_stars() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": "alice" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/starred"))
+        .and(header("authorization", "Bearer secret"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(items(0, 1, github_repo)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let host = host(Provider::Github, server.uri());
+    let token = creds("git", "secret");
+    let repos = list_repos(&host, Some(&token), SourceKind::Starred, "Alice")
+        .await
+        .unwrap();
+    assert_eq!(urls(&repos), ["https://git.example/org/r0.git"]);
+}
+
+#[tokio::test]
 async fn github_lists_another_user_through_the_public_list() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

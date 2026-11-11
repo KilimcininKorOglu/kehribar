@@ -10,6 +10,8 @@ text_enum! {
     pub enum SourceKind {
         User => "user",
         Org => "org",
+        /// The repositories a user starred.
+        Starred => "starred",
     }
 }
 
