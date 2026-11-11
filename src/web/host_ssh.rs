@@ -91,7 +91,7 @@ pub async fn remove(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, A
 /// server shows then. For a host key that changed on purpose.
 pub async fn forget_host_keys(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, AppError> {
     let host = load_host(&ctx, id).await?;
-    let removed = ssh::forget(&ctx.state.config.known_hosts(), &host.host)
+    let removed = ssh::forget(&ctx.state.config.known_hosts_of(&host.host))
         .await
         .map_err(AppError::internal)?;
     tracing::info!(host = %host.host, removed, "SSH host keys forgotten");

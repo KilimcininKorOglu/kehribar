@@ -383,7 +383,11 @@ fn access_for(
         .map(|key| KeyFile::write(&ctx.config.tmp_dir(), &key))
         .transpose()
         .map_err(|err| Failure::error(format!("cannot write the SSH key: {err}")))?;
-    let known_hosts = ctx.config.known_hosts();
+    // The file of the host whose settings the repository uses, which the
+    // host page lists and clears.
+    let known_hosts = ctx
+        .config
+        .known_hosts_of(repo_url::settings_host(&job.repo.host));
     if let Some(dir) = known_hosts.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|err| Failure::error(format!("cannot create {}: {err}", dir.display())))?;

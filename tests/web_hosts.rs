@@ -343,13 +343,12 @@ async fn ssh_keys_are_generated_pasted_and_deleted_and_only_the_public_key_shows
 async fn stored_host_keys_are_listed_and_forgotten_on_the_host_page() {
     let t = TestApp::new().await;
     t.post("/hosts", HOST_FORM).await;
-    let known_hosts = t.state.config.known_hosts();
-    std::fs::create_dir_all(known_hosts.parent().unwrap()).unwrap();
-    std::fs::write(
-        &known_hosts,
-        "[github.com]:2222 ssh-ed25519 AAAAhostkey1\ngitlab.com ssh-ed25519 AAAAother\n",
-    )
-    .unwrap();
+    let config = &t.state.config;
+    std::fs::create_dir_all(config.known_hosts_dir()).unwrap();
+    let known_hosts = config.known_hosts_of("github.com");
+    let other = config.known_hosts_of("gitlab.com");
+    std::fs::write(&known_hosts, "[github.com]:2222 ssh-ed25519 AAAAhostkey1\n").unwrap();
+    std::fs::write(&other, "gitlab.com ssh-ed25519 AAAAother\n").unwrap();
 
     let page = body_text(t.get("/hosts/1").await).await;
     assert!(page.contains("[github.com]:2222 ssh-ed25519 AAAAhostkey1"));
@@ -360,8 +359,9 @@ async fn stored_host_keys_are_listed_and_forgotten_on_the_host_page() {
         header_value(&forgotten, header::LOCATION),
         "/hosts/1?notice=host_key_forgotten"
     );
+    assert!(!known_hosts.exists());
     assert_eq!(
-        std::fs::read_to_string(&known_hosts).unwrap(),
+        std::fs::read_to_string(&other).unwrap(),
         "gitlab.com ssh-ed25519 AAAAother\n"
     );
     let page = body_text(t.get("/hosts/1?notice=host_key_forgotten").await).await;

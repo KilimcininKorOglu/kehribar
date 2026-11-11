@@ -52,6 +52,13 @@ async fn build_state(config: Config) -> Result<AppState, Box<dyn Error>> {
     if keys > 0 {
         tracing::info!(keys, "removed SSH key files of an earlier run");
     }
+    let moved = git_archive::git::ssh::split_legacy(
+        &config.legacy_known_hosts(),
+        &config.known_hosts_dir(),
+    )?;
+    if moved > 0 {
+        tracing::info!(moved, "moved stored SSH host keys into one file per host");
+    }
     Ok(AppState::new(pool, config, Catalog::load()?))
 }
 

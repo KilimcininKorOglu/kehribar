@@ -213,9 +213,21 @@ impl Config {
         self.data_dir.join("assets")
     }
 
-    /// The SSH host keys stored on the first connection to each server.
-    pub fn known_hosts(&self) -> PathBuf {
+    /// The SSH host keys stored on the first connection to each server, one
+    /// file per host (see [`crate::git::ssh::known_hosts_file`]).
+    pub fn known_hosts_dir(&self) -> PathBuf {
+        self.data_dir.join("ssh").join("known_hosts.d")
+    }
+
+    /// The single host key file of earlier versions; startup moves its keys
+    /// into [`Self::known_hosts_dir`].
+    pub fn legacy_known_hosts(&self) -> PathBuf {
         self.data_dir.join("ssh").join("known_hosts")
+    }
+
+    /// The host key file of the host `host`.
+    pub fn known_hosts_of(&self, host: &str) -> PathBuf {
+        crate::git::ssh::known_hosts_file(&self.known_hosts_dir(), host)
     }
 
     /// Reads the configuration from the process environment.

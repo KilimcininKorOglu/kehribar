@@ -57,7 +57,7 @@ The data lives in the named volume `git-archive-data`, mounted at `/data`:
 /data/git-archive.db                         SQLite database
 /data/repos/<host>/<owner>/<name>.git        bare mirror
 /data/repos/<host>/<owner>/<name>.wiki.git   wiki mirror, when there is one
-/data/ssh/known_hosts                        SSH host keys of the servers
+/data/ssh/known_hosts.d/<host>               SSH host keys, one file per server
 ```
 
 Keep the secret key. Without it the stored tokens and SSH keys cannot be decrypted. The mirrors themselves are plain bare Git repositories and do not need the key.
@@ -186,7 +186,7 @@ A repository URL can also be `ssh://git@host[:port]/owner/name.git` or the short
 
 Each host can hold one SSH key. On the host page, generate a new ed25519 key or paste a private key without a passphrase, then add the shown public key to the account on the server or as a read-only deploy key. The private key is stored encrypted with the secret key. During a fetch it is written to a file under `/data/tmp` that only the app user can read, and the file is removed when the fetch ends. Without a key, an SSH fetch uses no identity.
 
-The first connection to a server stores its host key in `/data/ssh/known_hosts`. When the server later shows another key, the fetch stops and the repository changes to "Error" with a message that names the host key. The host page lists the stored host keys of the host on every port. When a change is expected, for example after a server move, "Forget host keys" removes them and the next fetch stores the new key.
+The first connection to a server stores its host key in `/data/ssh/known_hosts.d/<host>`, one file per server, so forgetting the keys of one server never touches another. Startup moves the keys of the single `/data/ssh/known_hosts` file of earlier versions into these files. When the server later shows another key, the fetch stops and the repository changes to "Error" with a message that names the host key. The host page lists the stored host keys of the host on every port. When a change is expected, for example after a server move, "Forget host keys" removes them and the next fetch stores the new key.
 
 A source with the "SSH URL" option adds its repositories with the SSH clone URL the provider names, under the same archive path as the HTTPS URL. The SSH URL must be on the server of the host or on its `ssh.` name, as Azure DevOps uses (`ssh.dev.azure.com`), because the SSH key of the host goes to that server. A repository without such a URL, for example a gist, is skipped and named in the scan result.
 

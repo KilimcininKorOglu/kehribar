@@ -339,7 +339,7 @@ pub(super) async fn edit_page(
     message: Option<&str>,
     is_error: bool,
 ) -> Result<Response, AppError> {
-    let known_keys = ssh::known_keys(&ctx.state.config.known_hosts(), &host.host)
+    let known_keys = ssh::known_keys(&ctx.state.config.known_hosts_of(&host.host))
         .await
         .map_err(AppError::internal)?;
     let layout = ctx.layout(Nav::Hosts);

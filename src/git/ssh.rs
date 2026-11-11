@@ -1,5 +1,6 @@
 //! SSH keys of hosts and the stored host keys, handled with `ssh-keygen`.
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -168,89 +169,125 @@ pub async fn public_key(tmp: &Path, private: &str) -> Result<String, SshError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-/// Whether a `known_hosts` line belongs to `host` on any port. The file is
-/// read directly, because `ssh-keygen -F` finds a host only on one port.
-/// Fetches write plain, unhashed names (`host` or `[host]:port`), since
-/// they run without the system SSH configuration.
-fn is_entry_of(line: &str, host: &str) -> bool {
-    let line = line.trim();
-    if line.starts_with('#') {
-        return false;
+/// The file in `dir` that holds the stored host keys of `host`. Each host
+/// has its own file: forgetting the keys of one host removes one file, so
+/// it never loses a key that a fetch stores for another host at the same
+/// time. Characters other than letters, digits, `-` and an inner `.` are
+/// written as `%XX`, so the name never leaves `dir`.
+pub fn known_hosts_file(dir: &Path, host: &str) -> PathBuf {
+    let mut name = String::with_capacity(host.len());
+    for (at, byte) in host.to_ascii_lowercase().bytes().enumerate() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' || (byte == b'.' && at > 0) {
+            name.push(char::from(byte));
+        } else {
+            name.push_str(&format!("%{byte:02X}"));
+        }
     }
-    let Some(names) = line.split_whitespace().next() else {
-        return false;
-    };
-    names.split(',').any(|name| {
-        name.eq_ignore_ascii_case(host)
-            || name
-                .strip_prefix('[')
-                .and_then(|rest| rest.split_once("]:"))
-                .is_some_and(|(name, _port)| name.eq_ignore_ascii_case(host))
-    })
+    if name.is_empty() {
+        name.push('%');
+    }
+    dir.join(name)
 }
 
-async fn read_known_hosts(known_hosts: &Path) -> Result<String, SshError> {
-    match tokio::fs::read_to_string(known_hosts).await {
+async fn read_known_hosts(file: &Path) -> Result<String, SshError> {
+    match tokio::fs::read_to_string(file).await {
         Ok(text) => Ok(text),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(err) => Err(err.into()),
     }
 }
 
-/// The stored keys of `host` in `known_hosts`, as whole lines.
-pub async fn known_keys(known_hosts: &Path, host: &str) -> Result<Vec<String>, SshError> {
-    let text = read_known_hosts(known_hosts).await?;
-    Ok(text
-        .lines()
-        .filter(|line| is_entry_of(line, host))
-        .map(|line| line.trim().to_owned())
-        .collect())
+/// The key lines of a host file, without blank lines and comments.
+fn key_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
-/// Removes the stored keys of `host`, so the next connection stores the
-/// key the server shows then. Gives the number of removed lines.
-pub async fn forget(known_hosts: &Path, host: &str) -> Result<usize, SshError> {
-    // Two removals at once would each write back the lines the other one
-    // removed; one at a time, each reads the result of the last.
-    static FORGET: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    let _one_at_a_time = FORGET.lock().await;
-    let text = read_known_hosts(known_hosts).await?;
-    let mut kept = String::with_capacity(text.len());
-    let mut removed = 0;
-    for line in text.lines() {
-        if is_entry_of(line, host) {
-            removed += 1;
-        } else {
-            kept.push_str(line);
-            kept.push('\n');
+/// The stored keys of the host file `file`, as whole lines.
+pub async fn known_keys(file: &Path) -> Result<Vec<String>, SshError> {
+    let text = read_known_hosts(file).await?;
+    Ok(key_lines(&text).map(str::to_owned).collect())
+}
+
+/// Removes the host file `file`, so the next connection stores the key
+/// the server shows then. Gives the number of keys it held.
+pub async fn forget(file: &Path) -> Result<usize, SshError> {
+    let count = key_lines(&read_known_hosts(file).await?).count();
+    match tokio::fs::remove_file(file).await {
+        Ok(()) => Ok(count),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Moves the keys of `legacy`, the single `known_hosts` file of earlier
+/// versions, into the host files of `dir`, then removes it. A key already
+/// in its host file is not added again, so a run that stopped half way
+/// can run again. Call it at startup, before a fetch runs. Gives the
+/// number of keys moved.
+pub fn split_legacy(legacy: &Path, dir: &Path) -> std::io::Result<usize> {
+    let text = match std::fs::read_to_string(legacy) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(err),
+    };
+    let mut by_host: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for line in key_lines(&text) {
+        match line_host(line) {
+            Some(host) => by_host.entry(host).or_default().push(line),
+            None => tracing::warn!(line, "known_hosts line without a plain host name dropped"),
         }
     }
-    if removed == 0 {
-        return Ok(0);
+    std::fs::create_dir_all(dir)?;
+    let mut moved = 0;
+    for (host, lines) in by_host {
+        moved += append_missing(&known_hosts_file(dir, &host), &lines)?;
     }
-    // A rename replaces the file in one step, so a fetch that reads it at
-    // the same time sees the old or the new list, never half of one.
-    let next = known_hosts.with_extension(format!("new-{}", random_name()?));
-    replace_with(&next, known_hosts, kept.as_bytes()).await?;
-    Ok(removed)
+    std::fs::remove_file(legacy)?;
+    Ok(moved)
 }
 
-/// Writes `data` to `next` and renames it to `target`. On failure `next`
-/// is removed, so no copy of the list stays beside the file.
-async fn replace_with(next: &Path, target: &Path, data: &[u8]) -> std::io::Result<()> {
-    let written = match tokio::fs::write(next, data).await {
-        Ok(()) => tokio::fs::rename(next, target).await,
-        Err(err) => Err(err),
-    };
-    let Err(err) = written else {
-        return Ok(());
-    };
-    if let Err(remove) = tokio::fs::remove_file(next).await
-        && remove.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!(file = %next.display(), error = %remove, "cannot remove a temporary file");
+/// The host whose file a `known_hosts` line (`host` or `[host]:port`)
+/// belongs in: the name the settings of a repository use, so a gist key
+/// goes with github.com. Hashed names give `None`; fetches never write
+/// them.
+fn line_host(line: &str) -> Option<String> {
+    let first = line.split_whitespace().next()?.split(',').next()?;
+    if first.starts_with('|') {
+        return None;
     }
-    Err(err)
+    let bare = first
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once("]:"))
+        .map_or(first, |(host, _port)| host)
+        .to_ascii_lowercase();
+    Some(crate::repo_url::settings_host(&bare).to_owned())
+}
+
+/// Adds the lines of `lines` that `file` lacks. Gives how many it added.
+fn append_missing(file: &Path, lines: &[&str]) -> std::io::Result<usize> {
+    let existing = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err),
+    };
+    let mut text = existing.clone();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let mut added = 0;
+    for line in lines {
+        if !key_lines(&existing).any(|old| old == *line) {
+            text.push_str(line);
+            text.push('\n');
+            added += 1;
+        }
+    }
+    if added > 0 {
+        std::fs::write(file, text)?;
+    }
+    Ok(added)
 }
 
 #[cfg(test)]
@@ -308,107 +345,83 @@ mod tests {
         assert_eq!(left, ["bundle-1.bundle"]);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn removals_at_the_same_time_all_take_effect() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("known_hosts");
-        let hosts: Vec<String> = (0..16).map(|i| format!("h{i}.example")).collect();
-        for _ in 0..20 {
-            let text: String = hosts
-                .iter()
-                .map(|h| format!("{h} ssh-ed25519 AAAA\n"))
-                .collect();
-            std::fs::write(&file, text).unwrap();
-            let tasks: Vec<_> = hosts
-                .iter()
-                .map(|h| {
-                    let (file, h) = (file.clone(), h.clone());
-                    tokio::spawn(async move { forget(&file, &h).await.unwrap() })
-                })
-                .collect();
-            for task in tasks {
-                task.await.unwrap();
-            }
-            assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
-        }
-    }
-
-    #[tokio::test]
-    async fn a_failed_replace_leaves_no_temporary_copy() {
-        let dir = tempfile::tempdir().unwrap();
-        // A non-empty directory under the target name makes the rename fail.
-        let target = dir.path().join("known_hosts");
-        std::fs::create_dir(&target).unwrap();
-        std::fs::write(target.join("x"), "").unwrap();
-        let next = dir.path().join("known_hosts.new-1");
-        assert!(replace_with(&next, &target, b"line\n").await.is_err());
-        assert!(!next.exists());
-    }
-
     #[test]
-    fn known_host_lines_match_the_host_on_every_port() {
-        assert!(is_entry_of("git.example ssh-ed25519 AAAA", "git.example"));
-        assert!(is_entry_of(
-            "[git.example]:2222 ssh-ed25519 AAAA",
-            "git.example"
-        ));
-        assert!(is_entry_of(
-            "other,GIT.example ssh-ed25519 AAAA",
-            "git.example"
-        ));
-        assert!(!is_entry_of(
-            "git.example.org ssh-ed25519 AAAA",
-            "git.example"
-        ));
-        assert!(!is_entry_of(
-            "[git.example.org]:22 ssh-ed25519 AAAA",
-            "git.example"
-        ));
-        assert!(!is_entry_of(
-            "# git.example ssh-ed25519 AAAA",
-            "git.example"
-        ));
-        assert!(!is_entry_of("   ", "git.example"));
+    fn host_file_names_stay_inside_the_folder() {
+        let dir = Path::new("/k");
+        assert_eq!(
+            known_hosts_file(dir, "Git.Example"),
+            dir.join("git.example")
+        );
+        assert_eq!(known_hosts_file(dir, "h:8080"), dir.join("h%3A8080"));
+        assert_eq!(known_hosts_file(dir, ".."), dir.join("%2E."));
+        assert_eq!(known_hosts_file(dir, "a/b"), dir.join("a%2Fb"));
+        assert_eq!(known_hosts_file(dir, ""), dir.join("%"));
     }
 
     #[tokio::test]
-    async fn known_host_keys_are_listed_and_forgotten() {
+    async fn forgetting_one_host_keeps_the_keys_of_every_other() {
         let dir = tempfile::tempdir().unwrap();
-        let known_hosts = dir.path().join("known_hosts");
-        assert!(
-            known_keys(&known_hosts, "git.example")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert_eq!(forget(&known_hosts, "git.example").await.unwrap(), 0);
+        let git = known_hosts_file(dir.path(), "git.example");
+        let other = known_hosts_file(dir.path(), "other.example");
+        assert!(known_keys(&git).await.unwrap().is_empty());
+        assert_eq!(forget(&git).await.unwrap(), 0);
 
         std::fs::write(
-            &known_hosts,
-            "git.example ssh-ed25519 AAAA1\n[git.example]:2222 ssh-ed25519 AAAA2\nother.example ssh-ed25519 AAAA3\n",
+            &git,
+            "git.example ssh-ed25519 AAAA1\n\n[git.example]:2222 ssh-ed25519 AAAA2\n",
         )
         .unwrap();
-        let keys = known_keys(&known_hosts, "git.example").await.unwrap();
+        std::fs::write(&other, "other.example ssh-ed25519 AAAA3\n").unwrap();
         assert_eq!(
-            keys,
+            known_keys(&git).await.unwrap(),
             [
                 "git.example ssh-ed25519 AAAA1",
                 "[git.example]:2222 ssh-ed25519 AAAA2"
             ]
         );
-
-        assert_eq!(forget(&known_hosts, "git.example").await.unwrap(), 2);
-        assert!(
-            known_keys(&known_hosts, "git.example")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(forget(&git).await.unwrap(), 2);
+        assert!(!git.exists());
+        // A fetch that stores the key of another host meanwhile writes into
+        // a file the removal never reads or replaces.
         assert_eq!(
-            std::fs::read_to_string(&known_hosts).unwrap(),
-            "other.example ssh-ed25519 AAAA3\n"
+            known_keys(&other).await.unwrap(),
+            ["other.example ssh-ed25519 AAAA3"]
         );
-        // Only the list itself stays in the folder.
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn the_single_file_of_earlier_versions_is_split_by_host() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("known_hosts");
+        let dir = root.path().join("known_hosts.d");
+        assert_eq!(split_legacy(&legacy, &dir).unwrap(), 0);
+        std::fs::write(
+            &legacy,
+            "git.example ssh-ed25519 A1\n[GIT.example]:2222 ssh-ed25519 A2\n\
+             # comment\ngist.github.com ssh-ed25519 G1\ngithub.com ssh-ed25519 G2\n\
+             |1|hashed= ssh-ed25519 H\n",
+        )
+        .unwrap();
+        // A run that stopped half way had written one line already.
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            known_hosts_file(&dir, "git.example"),
+            "git.example ssh-ed25519 A1\n",
+        )
+        .unwrap();
+
+        assert_eq!(split_legacy(&legacy, &dir).unwrap(), 3);
+        assert!(!legacy.exists());
+        let read = |host: &str| std::fs::read_to_string(known_hosts_file(&dir, host)).unwrap();
+        assert_eq!(
+            read("git.example"),
+            "git.example ssh-ed25519 A1\n[GIT.example]:2222 ssh-ed25519 A2\n"
+        );
+        // A gist uses the settings of github.com, so its key goes there.
+        assert_eq!(
+            read("github.com"),
+            "gist.github.com ssh-ed25519 G1\ngithub.com ssh-ed25519 G2\n"
+        );
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
     }
 }
