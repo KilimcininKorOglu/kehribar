@@ -163,6 +163,40 @@ async fn branch_deleted_at_the_source_stays_in_the_archive() {
 }
 
 #[tokio::test]
+async fn a_deleted_branch_does_not_block_a_new_one_inside_its_name() {
+    let mut source = Source::new();
+    let first = source.commit("one");
+    source.git(&["branch", "feature"]);
+    source.git(&["branch", "release/1.0"]);
+    source.sync(100).await;
+
+    // `feature` becomes `feature/x`, `release/1.0` becomes `release`.
+    source.git(&["branch", "-D", "feature", "release/1.0"]);
+    source.git(&["branch", "feature/x"]);
+    source.git(&["branch", "release"]);
+    let report = source.sync(200).await;
+
+    let refs = source.archive_refs();
+    assert!(refs.contains_key("refs/heads/feature/x"), "{refs:?}");
+    assert!(refs.contains_key("refs/heads/release"), "{refs:?}");
+    assert!(!refs.contains_key("refs/heads/feature"));
+    assert!(!refs.contains_key("refs/heads/release/1.0"));
+    // The old refs are kept and reported as gone from the source.
+    let kept = |name: &str| refs[&format!("{REWRITTEN_REF_PREFIX}200/heads/{name}")].clone();
+    assert_eq!(
+        (kept("feature"), kept("release/1.0")),
+        (first.clone(), first)
+    );
+    let missing: Vec<&String> = report.missing_at_source().map(|(name, _)| name).collect();
+    assert_eq!(missing, ["refs/heads/feature", "refs/heads/release/1.0"]);
+    assert_eq!(report.refs_rescued, 2);
+    // A branch deleted without a conflict stays where it is.
+    source.git(&["branch", "-D", "feature/x"]);
+    source.sync(300).await;
+    assert!(source.archive_refs().contains_key("refs/heads/feature/x"));
+}
+
+#[tokio::test]
 async fn force_push_keeps_the_old_commit_and_fast_forward_does_not() {
     let mut source = Source::new();
     source.commit("one");

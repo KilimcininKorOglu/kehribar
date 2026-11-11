@@ -91,14 +91,10 @@ pub async fn sync(
 ) -> Result<SyncReport, GitError> {
     // Ask the source first: a missing repository leaves no directory behind.
     let remote = remote_refs(git, url, access).await?;
-    // Before any `git config` write: a `config.lock` left by a killed sync
-    // would make the first of them fail on every later sync.
-    if dir.join("HEAD").is_file() {
-        remove_stale_locks(dir).await?;
-    }
-    prepare_repository(git, url, dir, exclude).await?;
+    open_repository(git, url, dir, exclude).await?;
 
     let before = list_refs(git, dir).await?;
+    let set_aside = set_aside_blocking(git, dir, &before, &remote.refs, exclude, now).await?;
     git.run(
         Some(dir),
         ["fetch", "--quiet", "--no-write-fetch-head", "origin"],
@@ -109,25 +105,103 @@ pub async fn sync(
 
     let changes = classify_changes(git, dir, &before, &after, now).await?;
     let default_branch = point_head(git, dir, remote.head.as_deref(), &after).await?;
-    let tracked = |refs: BTreeMap<String, String>| -> BTreeMap<String, String> {
-        refs.into_iter()
-            .filter(|(name, _)| is_tracked(name, exclude))
-            .collect()
+    let fetched = Fetched {
+        changes,
+        set_aside,
+        after,
+        source: remote.refs,
     };
-    Ok(SyncReport {
-        refs_changed: changes.len() as u64,
-        refs_rescued: changes
+    Ok(fetched.report(default_branch, exclude))
+}
+
+/// The refs of one fetch, before they become a [`SyncReport`].
+struct Fetched {
+    changes: Vec<RefChange>,
+    set_aside: BTreeMap<String, String>,
+    after: BTreeMap<String, String>,
+    source: BTreeMap<String, String>,
+}
+
+impl Fetched {
+    fn report(self, default_branch: Option<String>, exclude: &[String]) -> SyncReport {
+        let tracked = |refs: BTreeMap<String, String>| -> BTreeMap<String, String> {
+            refs.into_iter()
+                .filter(|(name, _)| is_tracked(name, exclude))
+                .collect()
+        };
+        let rewritten = self
+            .changes
             .iter()
             .filter(|c| c.kind == ChangeKind::Rewritten)
-            .count() as u64,
-        default_branch,
-        changes: changes
-            .into_iter()
-            .filter(|c| is_tracked(&c.name, exclude))
-            .collect(),
-        archive_refs: tracked(after),
-        source_refs: tracked(remote.refs),
-    })
+            .count();
+        // A ref set aside left the archive's branches and tags with this
+        // fetch; listing it here lets the history mark it as deleted at the
+        // source.
+        let mut archive_refs = tracked(self.after);
+        archive_refs.extend(tracked(self.set_aside.clone()));
+        SyncReport {
+            refs_changed: self.changes.len() as u64,
+            refs_rescued: (rewritten + self.set_aside.len()) as u64,
+            default_branch,
+            changes: self
+                .changes
+                .into_iter()
+                .filter(|c| is_tracked(&c.name, exclude))
+                .collect(),
+            archive_refs,
+            source_refs: tracked(self.source),
+        }
+    }
+}
+
+/// Sets aside the archive refs that the source deleted and that block one
+/// of its refs by name: git cannot store `a` next to `a/b`, so the fetch
+/// would fail on every sync. Each one is kept like the old commit of a
+/// rewritten ref, then removed. Returns them, name to object id.
+async fn set_aside_blocking(
+    git: &Git,
+    dir: &Path,
+    before: &BTreeMap<String, String>,
+    remote: &BTreeMap<String, String>,
+    exclude: &[String],
+    now: i64,
+) -> Result<BTreeMap<String, String>, GitError> {
+    // Excluded refs are not fetched, so they need no room.
+    let fetched: BTreeMap<&str, &str> = remote
+        .iter()
+        .filter(|(name, _)| !ref_filter::is_excluded(exclude, name))
+        .map(|(name, id)| (name.as_str(), id.as_str()))
+        .collect();
+    let mut set_aside = BTreeMap::new();
+    for (name, id) in before {
+        if fetched.contains_key(name.as_str()) || !blocks(name, &fetched) {
+            continue;
+        }
+        rescue(git, dir, name, id, now).await?;
+        git.run(
+            Some(dir),
+            ["update-ref", "-d", name.as_str(), id.as_str()],
+            None,
+        )
+        .await?;
+        tracing::info!(r#ref = %name, "ref deleted at the source set aside for a new ref");
+        set_aside.insert(name.clone(), id.clone());
+    }
+    Ok(set_aside)
+}
+
+/// Whether `name` and a source ref lie one inside the other, such as
+/// `refs/heads/a` and `refs/heads/a/b`.
+fn blocks(name: &str, fetched: &BTreeMap<&str, &str>) -> bool {
+    let below = format!("{name}/");
+    let has_child = fetched
+        .range(below.as_str()..)
+        .next()
+        .is_some_and(|(other, _)| other.starts_with(&below));
+    let has_parent = name
+        .match_indices('/')
+        .any(|(at, _)| fetched.contains_key(&name[..at]));
+    has_child || has_parent
 }
 
 /// Mirrors the wiki repository. Returns `None` when the source has no wiki.
@@ -211,6 +285,22 @@ fn parse_ls_remote(text: &str) -> RemoteRefs {
         }
     }
     remote
+}
+
+/// Readies the archive for a fetch: removes the locks a killed sync left,
+/// then creates and configures the repository.
+async fn open_repository(
+    git: &Git,
+    url: &str,
+    dir: &Path,
+    exclude: &[String],
+) -> Result<(), GitError> {
+    // Before any `git config` write: a `config.lock` left by a killed sync
+    // would make the first of them fail on every later sync.
+    if dir.join("HEAD").is_file() {
+        remove_stale_locks(dir).await?;
+    }
+    prepare_repository(git, url, dir, exclude).await
 }
 
 async fn prepare_repository(
