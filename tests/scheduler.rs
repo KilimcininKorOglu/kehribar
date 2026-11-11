@@ -171,6 +171,92 @@ async fn missing_source_marks_the_repository_unreachable() {
     assert_eq!(runs[0].outcome, Some(RepoStatus::Unreachable));
 }
 
+/// Makes the repository due now and runs one tick.
+async fn sync_again(s: &Setup, id: i64) -> repos::Repo {
+    repos::schedule_now(&s.ctx.pool, id, unix_now())
+        .await
+        .unwrap();
+    assert_eq!(run_tick(&s.scheduler).await, 1);
+    repos::get(&s.ctx.pool, id).await.unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn first_sync_checks_and_repacks_the_archive() {
+    let s = setup().await;
+    let source = common::source_repo(s.dir.path(), "project");
+    let id = add_repo(&s.ctx.pool, &source, "project", None).await;
+    run_tick(&s.scheduler).await;
+
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Ok, "{:?}", repo.last_error);
+    assert!(repo.last_fsck_at.is_some());
+    assert_eq!(repo.fsck_error, None);
+    assert!(repo.last_repack_at.is_some());
+    assert!(repo.repack_saved_bytes.is_some());
+    // The repack left no loose objects.
+    let counts = common::git_in(&s.ctx.repo_dir(&repo), &["count-objects", "-v"]);
+    assert!(counts.lines().any(|l| l == "count: 0"), "{counts}");
+
+    // Not due again within the interval: the times stay.
+    let again = sync_again(&s, id).await;
+    assert_eq!(again.last_fsck_at, repo.last_fsck_at);
+    assert_eq!(again.last_repack_at, repo.last_repack_at);
+}
+
+#[tokio::test]
+async fn zero_days_turn_the_maintenance_off() {
+    let s = setup().await;
+    let overrides = Overrides {
+        fsck_interval_days: Some(0),
+        repack_interval_days: Some(0),
+        ..Overrides::default()
+    };
+    settings::save(&s.ctx.pool, &overrides).await.unwrap();
+    let source = common::source_repo(s.dir.path(), "project");
+    let id = add_repo(&s.ctx.pool, &source, "project", None).await;
+    run_tick(&s.scheduler).await;
+
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Ok);
+    assert_eq!((repo.last_fsck_at, repo.last_repack_at), (None, None));
+}
+
+#[tokio::test]
+async fn damaged_archive_fails_the_integrity_check_until_repaired() {
+    let s = setup().await;
+    let source = common::source_repo(s.dir.path(), "project");
+    let id = add_repo(&s.ctx.pool, &source, "project", None).await;
+    run_tick(&s.scheduler).await;
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+
+    // A loose object whose content is not a valid zlib stream.
+    let objects = s.ctx.repo_dir(&repo).join("objects/ab");
+    std::fs::create_dir_all(&objects).unwrap();
+    let broken = objects.join("cdef0123456789abcdef0123456789abcdef01");
+    std::fs::write(&broken, b"not an object").unwrap();
+    // Make the check due.
+    repos::record_fsck(&s.ctx.pool, id, 0, None).await.unwrap();
+
+    let failed = sync_again(&s, id).await;
+    assert_eq!(failed.status, RepoStatus::Error);
+    let message = failed.last_error.clone().unwrap();
+    assert!(message.starts_with("integrity check failed: "), "{message}");
+    assert!(failed.fsck_error.is_some());
+    let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 1).await.unwrap();
+    assert_eq!(runs[0].outcome, Some(RepoStatus::Error));
+    // A damaged archive is not repacked.
+    assert_eq!(failed.last_repack_at, repo.last_repack_at);
+
+    // The check repeats on the next sync although its interval has not passed.
+    let still = sync_again(&s, id).await;
+    assert_eq!(still.status, RepoStatus::Error);
+
+    std::fs::remove_file(&broken).unwrap();
+    let repaired = sync_again(&s, id).await;
+    assert_eq!(repaired.status, RepoStatus::Ok, "{:?}", repaired.last_error);
+    assert_eq!(repaired.fsck_error, None);
+}
+
 #[tokio::test]
 async fn archive_survives_when_the_source_disappears() {
     let s = setup().await;

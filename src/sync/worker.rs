@@ -8,6 +8,7 @@ use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
 use crate::db::sync_runs::{self, RunResult};
 use crate::db::unix_now;
+use crate::git::maintenance;
 use crate::git::mirror::{self, SyncReport};
 use crate::git::{Credentials, Git, GitError, GitErrorKind};
 use crate::ref_filter;
@@ -59,15 +60,11 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         dir: &dir,
         now: started,
     };
-    let result = mirror_repo(ctx, &job).await;
+    let (status, message, mirrored) = sync_and_maintain(ctx, &job, settings).await?;
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
     let size_bytes = archive_size(&dir).await;
 
-    let (status, message, mirrored) = match result {
-        Ok(mirrored) => (RepoStatus::Ok, None, mirrored),
-        Err(failure) => (failure.status, Some(failure.message), Mirrored::default()),
-    };
     log_outcome(repo, status, message.as_deref(), &mirrored.report);
     let outcome = SyncOutcome {
         status,
@@ -87,6 +84,98 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         message: message.as_deref(),
     };
     sync_runs::finish(&ctx.pool, run_id, &run).await
+}
+
+/// Fetches the repository, then runs the maintenance that is due. A failed
+/// integrity check fails the sync, but keeps the fetch report.
+async fn sync_and_maintain(
+    ctx: &SyncContext,
+    job: &Job<'_>,
+    settings: SyncSettings,
+) -> sqlx::Result<(RepoStatus, Option<String>, Mirrored)> {
+    let mirrored = match mirror_repo(ctx, job).await {
+        Ok(mirrored) => mirrored,
+        Err(failure) => return Ok((failure.status, Some(failure.message), Mirrored::default())),
+    };
+    let upkeep = maintain(job, settings).await;
+    upkeep.record(&ctx.pool, job.repo.id, job.now).await?;
+    Ok(match upkeep.failure() {
+        Some(message) => (RepoStatus::Error, Some(message), mirrored),
+        None => (RepoStatus::Ok, None, mirrored),
+    })
+}
+
+/// What the maintenance of one sync did; `None` means a task was not due.
+#[derive(Debug, Default)]
+struct Upkeep {
+    fsck: Option<Result<(), String>>,
+    repack: Option<Result<i64, String>>,
+}
+
+impl Upkeep {
+    async fn record(&self, pool: &sqlx::SqlitePool, id: i64, now: i64) -> sqlx::Result<()> {
+        if let Some(result) = &self.fsck {
+            repos::record_fsck(pool, id, now, result.as_ref().err().map(String::as_str)).await?;
+        }
+        if let Some(Ok(saved)) = self.repack {
+            repos::record_repack(pool, id, now, saved).await?;
+        }
+        Ok(())
+    }
+
+    /// The message of a failed task. Git's own errors stay in English, like
+    /// the fetch errors next to them.
+    fn failure(&self) -> Option<String> {
+        if let Some(Err(err)) = &self.fsck {
+            return Some(format!("integrity check failed: {err}"));
+        }
+        if let Some(Err(err)) = &self.repack {
+            return Some(format!("repack failed: {err}"));
+        }
+        None
+    }
+}
+
+/// Whether a task that last ran at `last` is due again after `days` days.
+/// Zero days turns the task off.
+fn is_due(last: Option<i64>, days: i64, now: i64) -> bool {
+    days > 0 && last.is_none_or(|at| now - at >= days * 86_400)
+}
+
+/// Runs the integrity check and the repack when they are due. A failed
+/// check repeats on every sync until it passes; a damaged repository is
+/// not repacked.
+async fn maintain(job: &Job<'_>, settings: SyncSettings) -> Upkeep {
+    let repo = job.repo;
+    let mut upkeep = Upkeep::default();
+    let fsck_days = settings.fsck_interval_days;
+    if (fsck_days > 0 && repo.fsck_error.is_some()) || is_due(repo.last_fsck_at, fsck_days, job.now)
+    {
+        let check = async |git: &Git, dir: &Path| maintenance::fsck(git, dir).await.map(|()| 0);
+        upkeep.fsck = Some(for_each_dir(job, check).await.map(|_| ()));
+    }
+    let damaged = matches!(upkeep.fsck, Some(Err(_)));
+    if !damaged && is_due(repo.last_repack_at, settings.repack_interval_days, job.now) {
+        upkeep.repack = Some(for_each_dir(job, maintenance::repack).await);
+    }
+    upkeep
+}
+
+/// Runs `task` on the repository and on its wiki when there is one, and
+/// adds up the numbers it returns. The first error stops the run.
+async fn for_each_dir<F>(job: &Job<'_>, task: F) -> Result<i64, String>
+where
+    F: AsyncFn(&Git, &Path) -> Result<i64, GitError>,
+{
+    let wiki = mirror::wiki_dir(job.dir);
+    let mut total = 0;
+    for dir in [job.dir, wiki.as_path()] {
+        if !dir.join("HEAD").is_file() {
+            continue;
+        }
+        total += task(job.git, dir).await.map_err(|err| err.message)?;
+    }
+    Ok(total)
 }
 
 /// The inputs of the Git work of one sync.

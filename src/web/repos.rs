@@ -210,6 +210,15 @@ struct DetailPage {
 }
 
 impl DetailPage {
+    /// "<size> freed" for the last repack, when it freed space.
+    fn repack_saved(&self) -> Option<String> {
+        let saved = self.repo.repack_saved_bytes.filter(|bytes| *bytes > 0)?;
+        Some(
+            self.layout
+                .tf("repo.repack_saved", &[("size", &self.layout.bytes(&saved))]),
+        )
+    }
+
     /// The host's ref patterns, which apply to this repository too.
     fn host_ref_exclude(&self) -> Option<String> {
         let patterns = self.host.as_ref()?.ref_exclude.as_deref()?;

@@ -29,6 +29,8 @@
     <div><dt>{{ layout.t("repo.size") }}</dt><dd>{{ layout.bytes(repo.size_bytes) }}</dd></div>
     <div><dt>{{ layout.t("repo.default_branch") }}</dt><dd class="mono">{% if let Some(branch) = repo.default_branch %}{{ branch }}{% else %}–{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.wiki") }}</dt><dd>{% if repo.has_wiki %}{{ layout.t("repo.wiki_yes") }}{% else %}{{ layout.t("repo.wiki_no") }}{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.last_fsck") }}</dt><dd>{% if let Some(ts) = repo.last_fsck_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% if repo.fsck_error.is_some() %} <span class="badge badge-error">{{ layout.t("repo.fsck_failed") }}</span>{% endif %}{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.last_repack") }}</dt><dd>{% if let Some(ts) = repo.last_repack_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% if let Some(saved) = repack_saved() %} <span class="muted small">({{ saved }})</span>{% endif %}{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
   </dl>
   {% if let Some(message) = repo.last_error %}
   <div class="alert alert-error"><strong>{{ layout.t("repo.last_error") }}:</strong> <span class="mono">{{ message }}</span></div>

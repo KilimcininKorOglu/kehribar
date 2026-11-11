@@ -15,6 +15,7 @@
     <label class="field">
       <span>{{ layout.t(field.label_key) }}</span>
       <input name="{{ field.name }}" type="number" min="{{ field.min }}" max="{{ field.max }}" value="{{ field.value }}" placeholder="{{ field.default }}" inputmode="numeric">
+      {% if let Some(help) = field.help_key %}<small class="muted">{{ layout.t(help) }}</small>{% endif %}
       <small class="muted">{{ field.default_text }}</small>
     </label>
     {% endfor %}

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use git_archive::git::maintenance;
 use git_archive::git::mirror::{self, REWRITTEN_REF_PREFIX};
 use git_archive::git::{Git, GitErrorKind};
 use tempfile::TempDir;
@@ -318,6 +319,49 @@ async fn stale_lock_files_from_a_killed_sync_are_removed() {
     assert_eq!(report.refs_changed, 1);
     assert!(!source.archive.join("packed-refs.lock").exists());
     assert!(!source.archive.join("refs/heads/main.lock").exists());
+}
+
+#[tokio::test]
+async fn repack_keeps_rescued_and_unreachable_commits() {
+    let mut source = Source::new();
+    source.commit("one");
+    let lost = source.commit("two");
+    source.sync(100).await;
+    source.git(&["reset", "--quiet", "--hard", "HEAD~1"]);
+    source.commit("replacement");
+    assert_eq!(source.sync(200).await.refs_rescued, 1);
+
+    // A commit that no ref and no reflog reaches.
+    let tree = git_in(&source.archive, &["rev-parse", "HEAD^{tree}"]);
+    let dangling = git_in(
+        &source.archive,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit-tree",
+            &tree,
+            "-m",
+            "dangling",
+        ],
+    );
+
+    maintenance::fsck(&git(), &source.archive).await.unwrap();
+    let before = mirror::disk_usage(&source.archive).await.unwrap() as i64;
+    let saved = maintenance::repack(&git(), &source.archive).await.unwrap();
+    let after = mirror::disk_usage(&source.archive).await.unwrap() as i64;
+    assert_eq!(saved, before - after);
+
+    for commit in [&lost, &dangling] {
+        git_in(
+            &source.archive,
+            &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+        );
+    }
+    let counts = git_in(&source.archive, &["count-objects", "-v"]);
+    assert!(counts.lines().any(|l| l == "count: 0"), "{counts}");
+    maintenance::fsck(&git(), &source.archive).await.unwrap();
 }
 
 #[tokio::test]

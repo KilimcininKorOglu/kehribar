@@ -198,9 +198,19 @@ async fn settings_page_saves_overrides_and_rejects_out_of_range_values() {
         .await;
     assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body_text(bad).await.contains("1 ile 10080 arasında"));
+    let bad = t.post("/settings", "repack_interval=400").await;
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body_text(bad)
+            .await
+            .contains("Disk bakımı aralığı (gün): 0 ile 365 arasında")
+    );
 
     let saved = t
-        .post("/settings", "interval=30&concurrency=4&git_timeout=")
+        .post(
+            "/settings",
+            "interval=30&concurrency=4&git_timeout=&fsck_interval=0&repack_interval=14",
+        )
         .await;
     assert_eq!(
         header_value(&saved, header::LOCATION),
@@ -212,6 +222,8 @@ async fn settings_page_saves_overrides_and_rejects_out_of_range_values() {
     assert_eq!(effective.interval_minutes, 30);
     assert_eq!(effective.concurrency, 4);
     assert_eq!(effective.git_timeout_seconds, 3600);
+    assert_eq!(effective.fsck_interval_days, 0);
+    assert_eq!(effective.repack_interval_days, 14);
 
     let cleared = t
         .post("/settings", "interval=&concurrency=&git_timeout=")

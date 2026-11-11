@@ -16,6 +16,8 @@ pub const ENV_DATA_DIR: &str = "GIT_ARCHIVE_DATA_DIR";
 pub const ENV_SYNC_INTERVAL_MINUTES: &str = "GIT_ARCHIVE_SYNC_INTERVAL_MINUTES";
 pub const ENV_SYNC_CONCURRENCY: &str = "GIT_ARCHIVE_SYNC_CONCURRENCY";
 pub const ENV_GIT_TIMEOUT_SECONDS: &str = "GIT_ARCHIVE_GIT_TIMEOUT_SECONDS";
+pub const ENV_FSCK_INTERVAL_DAYS: &str = "GIT_ARCHIVE_FSCK_INTERVAL_DAYS";
+pub const ENV_REPACK_INTERVAL_DAYS: &str = "GIT_ARCHIVE_REPACK_INTERVAL_DAYS";
 pub const ENV_SESSION_TTL_HOURS: &str = "GIT_ARCHIVE_SESSION_TTL_HOURS";
 pub const ENV_COOKIE_SECURE: &str = "GIT_ARCHIVE_COOKIE_SECURE";
 pub const ENV_LOG_LEVEL: &str = "GIT_ARCHIVE_LOG_LEVEL";
@@ -46,6 +48,10 @@ pub struct Config {
     pub sync_interval_minutes: u32,
     pub sync_concurrency: u32,
     pub git_timeout_seconds: u64,
+    /// Days between integrity checks of a repository; 0 turns them off.
+    pub fsck_interval_days: u32,
+    /// Days between repacks of a repository; 0 turns them off.
+    pub repack_interval_days: u32,
     pub session_ttl_hours: u32,
     pub cookie_secure: bool,
     pub log_level: String,
@@ -62,6 +68,8 @@ impl fmt::Debug for Config {
             .field("sync_interval_minutes", &self.sync_interval_minutes)
             .field("sync_concurrency", &self.sync_concurrency)
             .field("git_timeout_seconds", &self.git_timeout_seconds)
+            .field("fsck_interval_days", &self.fsck_interval_days)
+            .field("repack_interval_days", &self.repack_interval_days)
             .field("session_ttl_hours", &self.session_ttl_hours)
             .field("cookie_secure", &self.cookie_secure)
             .field("log_level", &self.log_level)
@@ -102,6 +110,8 @@ impl Config {
             sync_interval_minutes: 360,
             sync_concurrency: 2,
             git_timeout_seconds: 3600,
+            fsck_interval_days: 7,
+            repack_interval_days: 7,
             session_ttl_hours: 168,
             cookie_secure: false,
             log_level: String::from("info"),
@@ -129,6 +139,9 @@ impl Config {
         self.sync_concurrency = env.positive(ENV_SYNC_CONCURRENCY, self.sync_concurrency)?;
         self.git_timeout_seconds =
             env.positive(ENV_GIT_TIMEOUT_SECONDS, self.git_timeout_seconds)?;
+        self.fsck_interval_days = env.parsed(ENV_FSCK_INTERVAL_DAYS, self.fsck_interval_days)?;
+        self.repack_interval_days =
+            env.parsed(ENV_REPACK_INTERVAL_DAYS, self.repack_interval_days)?;
         Ok(())
     }
 }
@@ -323,10 +336,14 @@ mod tests {
         pairs.push((ENV_LISTEN_ADDR, "127.0.0.1:9000"));
         pairs.push((ENV_COOKIE_SECURE, "TRUE"));
         pairs.push((ENV_SYNC_INTERVAL_MINUTES, "15"));
+        pairs.push((ENV_FSCK_INTERVAL_DAYS, "0"));
         let config = load(&pairs).unwrap();
         assert_eq!(config.listen_addr.unwrap().to_string(), "127.0.0.1:9000");
         assert!(config.cookie_secure);
         assert_eq!(config.sync_interval_minutes, 15);
+        // Zero turns the integrity check off.
+        assert_eq!(config.fsck_interval_days, 0);
+        assert_eq!(config.repack_interval_days, 7);
     }
 
     #[test]

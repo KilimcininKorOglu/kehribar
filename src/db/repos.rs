@@ -41,6 +41,11 @@ pub struct Repo {
     pub created_at: i64,
     /// Ref patterns left out of this repository's fetches, besides the host's.
     pub ref_exclude: Option<String>,
+    pub last_fsck_at: Option<i64>,
+    /// Set while the last integrity check failed.
+    pub fsck_error: Option<String>,
+    pub last_repack_at: Option<i64>,
+    pub repack_saved_bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +89,8 @@ macro_rules! select_repos {
             "SELECT id, url, host, owner, name, source_id, username, token_enc, \
              interval_minutes, wiki_enabled, status, last_sync_at, last_success_at, \
              next_sync_at, last_error, size_bytes, default_branch, has_wiki, created_at, \
-             ref_exclude FROM repos ",
+             ref_exclude, last_fsck_at, fsck_error, last_repack_at, repack_saved_bytes \
+             FROM repos ",
             $tail
         )
     };
@@ -189,6 +195,33 @@ pub async fn finish(pool: &SqlitePool, id: i64, outcome: &SyncOutcome<'_>) -> sq
     .bind(id)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// Records an integrity check; `error` is `None` when it passed.
+pub async fn record_fsck(
+    pool: &SqlitePool,
+    id: i64,
+    at: i64,
+    error: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE repos SET last_fsck_at = ?, fsck_error = ? WHERE id = ?")
+        .bind(at)
+        .bind(error)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Records a repack and the bytes it saved.
+pub async fn record_repack(pool: &SqlitePool, id: i64, at: i64, saved: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE repos SET last_repack_at = ?, repack_saved_bytes = ? WHERE id = ?")
+        .bind(at)
+        .bind(saved)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

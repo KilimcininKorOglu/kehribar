@@ -120,6 +120,10 @@ mod tests {
             has_wiki: false,
             created_at: 0,
             ref_exclude: None,
+            last_fsck_at: None,
+            fsck_error: None,
+            last_repack_at: None,
+            repack_saved_bytes: None,
         }
     }
 
