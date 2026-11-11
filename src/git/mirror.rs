@@ -476,14 +476,49 @@ async fn classify_changes(
     Ok(changes)
 }
 
-/// Keeps `old_id`, the commit a rewritten ref pointed to.
+/// Seconds after the sync start a kept commit may be named with, when an
+/// earlier sync of the same second kept another commit of the same ref.
+const RESCUE_NAME_TRIES: i64 = 60;
+
+/// Keeps `old_id`, the commit a rewritten ref pointed to. A name that holds
+/// another commit is never overwritten; the next second's name is used.
 async fn rescue(git: &Git, dir: &Path, name: &str, old_id: &str, now: i64) -> Result<(), GitError> {
     let short = name.strip_prefix("refs/").unwrap_or(name);
-    let rescue = format!("{REWRITTEN_REF_PREFIX}{now}/{short}");
-    git.run(Some(dir), ["update-ref", rescue.as_str(), old_id], None)
+    for at in now..now + RESCUE_NAME_TRIES {
+        let rescue = format!("{REWRITTEN_REF_PREFIX}{at}/{short}");
+        match ref_target(git, dir, &rescue).await? {
+            Some(id) if id == old_id => return Ok(()),
+            Some(_) => continue,
+            None => {}
+        }
+        // The empty old value makes the update fail if the ref exists.
+        git.run(Some(dir), ["update-ref", rescue.as_str(), old_id, ""], None)
+            .await?;
+        tracing::info!(r#ref = %name, old = %old_id, kept_as = %rescue, "rewritten ref kept");
+        return Ok(());
+    }
+    Err(GitError {
+        kind: GitErrorKind::Other,
+        exit_code: None,
+        message: format!("no free name to keep the old commit of {name}"),
+    })
+}
+
+/// The object `name` points to, when that exact ref exists.
+async fn ref_target(git: &Git, dir: &Path, name: &str) -> Result<Option<String>, GitError> {
+    let out = git
+        .run(
+            Some(dir),
+            ["for-each-ref", "--format=%(refname) %(objectname)", name],
+            None,
+        )
         .await?;
-    tracing::info!(r#ref = %name, old = %old_id, kept_as = %rescue, "rewritten ref kept");
-    Ok(())
+    // The pattern also matches refs below `name`; only the ref itself counts.
+    Ok(String::from_utf8_lossy(&out)
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .find(|(found, _)| *found == name)
+        .map(|(_, id)| id.to_owned()))
 }
 
 /// A commit kept when its ref was rewritten.

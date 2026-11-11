@@ -230,6 +230,36 @@ async fn force_push_keeps_the_old_commit_and_fast_forward_does_not() {
 }
 
 #[tokio::test]
+async fn two_rewrites_in_the_same_second_keep_both_old_commits() {
+    let mut source = Source::new();
+    let first = source.commit("one");
+    source.sync(100).await;
+
+    source.git(&["commit", "--quiet", "--amend", "--allow-empty", "-m", "two"]);
+    let second = source.git(&["rev-parse", "HEAD"]);
+    assert_eq!(source.sync(500).await.refs_rescued, 1);
+    source.git(&[
+        "commit",
+        "--quiet",
+        "--amend",
+        "--allow-empty",
+        "-m",
+        "three",
+    ]);
+    assert_eq!(source.sync(500).await.refs_rescued, 1);
+
+    let refs = source.archive_refs();
+    assert_eq!(
+        refs[&format!("{REWRITTEN_REF_PREFIX}500/heads/main")],
+        first
+    );
+    assert_eq!(
+        refs[&format!("{REWRITTEN_REF_PREFIX}501/heads/main")],
+        second
+    );
+}
+
+#[tokio::test]
 async fn moved_tag_is_kept() {
     let mut source = Source::new();
     let first = source.commit("one");
