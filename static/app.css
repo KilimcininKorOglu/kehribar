@@ -284,6 +284,17 @@ pre,
   /* A long select option must not widen the form past a narrow screen. */
   grid-template-columns: minmax(0, 1fr);
   gap: 0.9rem;
+  /* A card stretched to the height of its row keeps its rows together. */
+  align-content: start;
+}
+
+/* The gap spaces the rows; grid items do not collapse their margins. */
+.stack > * {
+  margin-block: 0;
+}
+
+.stack > * + h3 {
+  margin-top: 0.75rem;
 }
 
 .empty-state {
