@@ -142,6 +142,11 @@ pub fn form_request(uri: &str, body: &str) -> Request<Body> {
         .unwrap()
 }
 
+/// `text` encoded as one value of a form body.
+pub fn urlencode(text: &str) -> String {
+    url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
+}
+
 pub async fn body_text(response: Response<Body>) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()

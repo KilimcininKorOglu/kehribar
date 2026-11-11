@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use axum::http::{StatusCode, header};
-use common::{TestApp, body_text, git_in, header_value};
+use common::{TestApp, body_text, git_in, header_value, urlencode};
 use git_archive::backup::{self, s3::PART_SIZE};
 use git_archive::config::Config;
 use git_archive::crypto::Cipher;
@@ -411,8 +411,4 @@ async fn settings_page_saves_tests_and_starts_the_backup() {
     t.post("/settings/backup", "clear_s3_secret=1").await;
     let page = body_text(t.get("/settings").await).await;
     assert!(!page.contains("Kayıtlı bir secret access key var."));
-}
-
-fn urlencode(text: &str) -> String {
-    url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
 }

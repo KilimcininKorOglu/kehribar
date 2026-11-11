@@ -8,7 +8,7 @@ mod common;
 use std::sync::Arc;
 
 use axum::http::{StatusCode, header};
-use common::{TestApp, body_text, header_value};
+use common::{TestApp, body_text, header_value, urlencode};
 use git_archive::config::Config;
 use git_archive::crypto::Cipher;
 use git_archive::db::repos::{self, NewRepo, RepoStatus};
@@ -239,8 +239,4 @@ async fn settings_page_saves_and_tests_the_channels() {
     // The error stays on the page until a delivery works.
     let page = body_text(t.get("/settings").await).await;
     assert!(page.contains("Son bildirim hatası"));
-}
-
-fn urlencode(text: &str) -> String {
-    url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
 }
