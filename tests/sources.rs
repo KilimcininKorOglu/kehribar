@@ -612,7 +612,7 @@ async fn invalid_source_forms_are_rejected() {
         ),
         (
             format!("host_id={bitbucket}&kind=starred&name=alice"),
-            "Yıldızlananlar yalnız GitHub, GitLab, Forgejo / Gitea ve Gitee",
+            "türü yalnız GitHub, GitLab, Forgejo / Gitea ve Gitee",
         ),
         (
             format!("host_id={github}&kind=org&name=a%2Fb"),
