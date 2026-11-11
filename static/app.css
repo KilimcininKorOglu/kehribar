@@ -944,8 +944,10 @@ pre.diff {
   padding: 0.5rem 1rem;
 }
 
+/* Wide enough that words stay whole; the table scrolls on a phone. */
 .commit-subject {
-  word-break: break-word;
+  min-width: 11rem;
+  overflow-wrap: anywhere;
 }
 
 .commit-title {
