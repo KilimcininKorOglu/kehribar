@@ -210,6 +210,10 @@ pub async fn known_keys(known_hosts: &Path, host: &str) -> Result<Vec<String>, S
 /// Removes the stored keys of `host`, so the next connection stores the
 /// key the server shows then. Gives the number of removed lines.
 pub async fn forget(known_hosts: &Path, host: &str) -> Result<usize, SshError> {
+    // Two removals at once would each write back the lines the other one
+    // removed; one at a time, each reads the result of the last.
+    static FORGET: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one_at_a_time = FORGET.lock().await;
     let text = read_known_hosts(known_hosts).await?;
     let mut kept = String::with_capacity(text.len());
     let mut removed = 0;
@@ -302,6 +306,31 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, ["bundle-1.bundle"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn removals_at_the_same_time_all_take_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("known_hosts");
+        let hosts: Vec<String> = (0..16).map(|i| format!("h{i}.example")).collect();
+        for _ in 0..20 {
+            let text: String = hosts
+                .iter()
+                .map(|h| format!("{h} ssh-ed25519 AAAA\n"))
+                .collect();
+            std::fs::write(&file, text).unwrap();
+            let tasks: Vec<_> = hosts
+                .iter()
+                .map(|h| {
+                    let (file, h) = (file.clone(), h.clone());
+                    tokio::spawn(async move { forget(&file, &h).await.unwrap() })
+                })
+                .collect();
+            for task in tasks {
+                task.await.unwrap();
+            }
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+        }
     }
 
     #[tokio::test]
