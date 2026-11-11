@@ -84,6 +84,18 @@ query = "URL'nin sonunda soru işareti (?) veya # ile başlayan bir ek olamaz."
 path = "URL yolu kullanıcı/repo biçiminde olmalı. Yolda yalnız harf, rakam, '.', '-', '_' ve '~' bulunabilir."
 gist_owner = "Gist'i sahibinin adıyla birlikte girin: https://gist.github.com/<kullanıcı>/<id>"
 
+[bulk]
+title = "Birden çok repo ekle"
+help = "Her satıra bir URL yazın. Her repo, bulunduğu sunucunun token'ını kullanır. Eklenemeyen satırlar düzeltebilmeniz için alanda kalır."
+urls = "Git URL'leri"
+submit = "Hepsini ekle"
+summary = "{n} repo eklendi."
+col_url = "URL"
+col_result = "Sonuç"
+added = "Eklendi"
+exists = "Zaten arşivde"
+invalid = "Geçersiz"
+
 [repo_new]
 title = "Repo ekle"
 url = "Git URL'si"

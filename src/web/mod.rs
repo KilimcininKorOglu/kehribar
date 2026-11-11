@@ -102,6 +102,7 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(repos::list))
         .route("/repos/new", get(repos::new_form))
         .route("/repos", post(repos::create))
+        .route("/repos/bulk", post(repos::create_bulk))
         .route("/repos/{id}", get(repos::show))
         .route("/repos/{id}/sync", post(repos::sync_now))
         .route("/repos/{id}/settings", post(repos::update))

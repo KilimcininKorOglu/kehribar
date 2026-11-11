@@ -5,7 +5,7 @@
 mod common;
 
 use axum::http::{StatusCode, header};
-use common::{TestApp, body_text, header_value};
+use common::{TestApp, body_text, header_value, urlencode};
 use git_archive::db::repos::{self, RepoStatus};
 use git_archive::db::unix_now;
 use git_archive::settings;
@@ -25,6 +25,45 @@ async fn invalid_url_is_rejected_with_a_message() {
         "{html}"
     );
     assert!(repos::list(&t.state.pool, None).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn bulk_add_reports_every_line_and_keeps_the_failed_ones() {
+    let t = TestApp::new().await;
+    t.post("/repos", &format!("url={URL}")).await;
+    let lines = [
+        "https://github.com/tokio-rs/axum",
+        "",
+        "  git@gitlab.com:group/project.git  ",
+        "https://github.com/rust-lang/rust",
+        "ftp://example.com/a/b",
+    ]
+    .join("\n");
+    let response = t
+        .post(
+            "/repos/bulk",
+            &format!("urls={}&interval=90", urlencode(&lines)),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(html.contains("2 repo eklendi."), "{html}");
+    assert!(html.contains("href=\"/repos/2\""));
+    assert!(html.contains("Zaten arşivde"));
+    assert!(html.contains("Yalnız http, https ve ssh ile başlayan"));
+    // Only the invalid line stays in the field.
+    assert!(html.contains(">ftp://example.com/a/b</textarea>"), "{html}");
+
+    let added = repos::list(&t.state.pool, None).await.unwrap();
+    assert_eq!(added.len(), 3);
+    let gitlab = added.iter().find(|r| r.host == "gitlab.com").unwrap();
+    assert_eq!(gitlab.url, "git@gitlab.com:group/project.git");
+    assert_eq!(gitlab.interval_minutes, Some(90));
+    assert!(!gitlab.wiki_enabled);
+
+    let bad = t.post("/repos/bulk", "urls=x&interval=0").await;
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(repos::list(&t.state.pool, None).await.unwrap().len(), 3);
 }
 
 #[tokio::test]

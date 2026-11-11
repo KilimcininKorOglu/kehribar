@@ -121,17 +121,91 @@ struct NewPage {
     interval: String,
     username: String,
     error: Option<String>,
+    /// The URL list of the bulk form; after a run, the lines that failed.
+    bulk_urls: String,
+    bulk_rows: Vec<BulkRow>,
+    bulk_error: Option<String>,
+}
+
+impl NewPage {
+    fn blank(layout: Layout) -> Self {
+        Self {
+            layout,
+            url: String::new(),
+            wiki: true,
+            interval: String::new(),
+            username: String::new(),
+            error: None,
+            bulk_urls: String::new(),
+            bulk_rows: Vec::new(),
+            bulk_error: None,
+        }
+    }
+
+    fn bulk_added(&self) -> i64 {
+        let added = self
+            .bulk_rows
+            .iter()
+            .filter(|row| matches!(row.outcome, Added::Yes(_)))
+            .count();
+        i64::try_from(added).unwrap_or(i64::MAX)
+    }
+}
+
+/// One line of the bulk form and what became of it.
+pub struct BulkRow {
+    pub url: String,
+    pub outcome: Added,
+}
+
+/// What adding one URL did.
+pub enum Added {
+    /// Added under this id.
+    Yes(i64),
+    /// The URL, or the host/owner/name path, is in the archive already.
+    Exists,
+    /// Not a valid repository URL; the message key says why.
+    Invalid(&'static str),
+}
+
+/// The settings a new repository gets besides its URL.
+struct AddSettings<'a> {
+    interval: Option<i64>,
+    wiki: bool,
+    username: Option<&'a str>,
+    token_enc: Option<&'a [u8]>,
+}
+
+/// Adds the repository at `url` to the archive, due for an immediate sync.
+async fn add_repo(
+    state: &AppState,
+    url: &str,
+    settings: &AddSettings<'_>,
+) -> Result<Added, AppError> {
+    let location = match repo_url::parse(url) {
+        Ok(location) => location,
+        Err(err) => return Ok(Added::Invalid(err.message_key())),
+    };
+    let repo = NewRepo {
+        url: &location.url,
+        host: &location.host,
+        owner: &location.owner,
+        name: &location.name,
+        source_id: None,
+        username: settings.username,
+        token_enc: settings.token_enc,
+        interval_minutes: settings.interval,
+        wiki_enabled: settings.wiki,
+    };
+    let Some(id) = repos::insert(&state.pool, &repo, unix_now()).await? else {
+        return Ok(Added::Exists);
+    };
+    tracing::info!(url = %location.url, "repository added");
+    Ok(Added::Yes(id))
 }
 
 pub async fn new_form(ctx: PageContext) -> Result<Response, AppError> {
-    let page = NewPage {
-        layout: ctx.layout(Nav::Repos),
-        url: String::new(),
-        wiki: true,
-        interval: String::new(),
-        username: String::new(),
-        error: None,
-    };
+    let page = NewPage::blank(ctx.layout(Nav::Repos));
     Ok(render(&page)?.into_response())
 }
 
@@ -148,42 +222,79 @@ pub async fn create(ctx: PageContext, Form(form): Form<NewRepoForm>) -> Result<R
     let wiki = is_checked(form.wiki.as_deref());
     // The token is never sent back to the browser; it must be typed again.
     let invalid = |ctx: &PageContext, key: &str| {
-        let layout = ctx.layout(Nav::Repos);
-        let page = NewPage {
-            error: Some(layout.t(key).to_owned()),
-            layout,
-            url: form.url.clone(),
-            wiki,
-            interval: form.interval.clone().unwrap_or_default(),
-            username: form.username.clone().unwrap_or_default(),
-        };
+        let mut page = NewPage::blank(ctx.layout(Nav::Repos));
+        page.error = Some(page.layout.t(key).to_owned());
+        page.url = form.url.clone();
+        page.wiki = wiki;
+        page.interval = form.interval.clone().unwrap_or_default();
+        page.username = form.username.clone().unwrap_or_default();
         Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response())
-    };
-    let location = match repo_url::parse(&form.url) {
-        Ok(location) => location,
-        Err(err) => return invalid(&ctx, err.message_key()),
     };
     let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {
         return invalid(&ctx, "form.interval_invalid");
     };
     let token_enc = encrypt_token(&ctx.state.cipher, form.token.as_deref())?;
-    let repo = NewRepo {
-        url: &location.url,
-        host: &location.host,
-        owner: &location.owner,
-        name: &location.name,
-        source_id: None,
+    let settings = AddSettings {
+        interval,
+        wiki,
         username: optional_text(form.username.as_deref()),
         token_enc: token_enc.as_deref(),
-        interval_minutes: interval,
-        wiki_enabled: wiki,
     };
-    let Some(id) = repos::insert(&ctx.state.pool, &repo, unix_now()).await? else {
-        return invalid(&ctx, "repo_new.exists");
+    match add_repo(&ctx.state, &form.url, &settings).await? {
+        Added::Yes(id) => {
+            ctx.state.scheduler.wake();
+            Ok(Redirect::to(&format!("/repos/{id}")).into_response())
+        }
+        Added::Exists => invalid(&ctx, "repo_new.exists"),
+        Added::Invalid(key) => invalid(&ctx, key),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkForm {
+    urls: String,
+    wiki: Option<String>,
+    interval: Option<String>,
+}
+
+/// Adds one repository per line. The page lists the outcome of every line
+/// and keeps the lines that failed in the field, to be corrected.
+pub async fn create_bulk(
+    ctx: PageContext,
+    Form(form): Form<BulkForm>,
+) -> Result<Response, AppError> {
+    let mut page = NewPage::blank(ctx.layout(Nav::Repos));
+    page.wiki = is_checked(form.wiki.as_deref());
+    page.interval = form.interval.clone().unwrap_or_default();
+    let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {
+        page.bulk_urls = form.urls;
+        page.bulk_error = Some(page.layout.t("form.interval_invalid").to_owned());
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
     };
-    tracing::info!(url = %location.url, "repository added");
-    ctx.state.scheduler.wake();
-    Ok(Redirect::to(&format!("/repos/{id}")).into_response())
+    let settings = AddSettings {
+        interval,
+        wiki: page.wiki,
+        username: None,
+        token_enc: None,
+    };
+    for url in form.urls.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let outcome = add_repo(&ctx.state, url, &settings).await?;
+        page.bulk_rows.push(BulkRow {
+            url: url.to_owned(),
+            outcome,
+        });
+    }
+    page.bulk_urls = page
+        .bulk_rows
+        .iter()
+        .filter(|row| matches!(row.outcome, Added::Invalid(_)))
+        .map(|row| row.url.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if page.bulk_added() > 0 {
+        ctx.state.scheduler.wake();
+    }
+    Ok(render(&page)?.into_response())
 }
 
 #[derive(Template)]

@@ -87,6 +87,19 @@ query = "The URL must not end with a ? or # part."
 path = "The URL path must be owner/name with only letters, digits, '.', '-', '_' or '~'."
 gist_owner = "Enter the gist with its owner: https://gist.github.com/<user>/<id>"
 
+[bulk]
+title = "Add many repositories"
+help = "One URL per line. Each repository uses the token of its host. Lines that fail stay in the field, so you can correct them."
+urls = "Git URLs"
+submit = "Add all"
+summary = "{n} repositories added."
+summary_one = "{n} repository added."
+col_url = "URL"
+col_result = "Result"
+added = "Added"
+exists = "Already in the archive"
+invalid = "Invalid"
+
 [repo_new]
 title = "Add repository"
 url = "Git URL"

@@ -47,4 +47,56 @@
     </div>
   </form>
 </section>
+
+<section class="card form-card" id="bulk">
+  <h2>{{ layout.t("bulk.title") }}</h2>
+  <p class="muted small">{{ layout.t("bulk.help") }}</p>
+  {% if let Some(error) = bulk_error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+  {% if !bulk_rows.is_empty() %}
+  <p class="alert alert-ok" role="status">{{ layout.tf_number("bulk.summary", &bulk_added()) }}</p>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ layout.t("bulk.col_url") }}</th>
+          <th scope="col">{{ layout.t("bulk.col_result") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in bulk_rows %}
+        <tr>
+          <td class="mono small">{{ row.url }}</td>
+          <td>
+            {% match row.outcome %}
+            {% when Added::Yes(id) %}<a href="/repos/{{ id }}"><span class="badge badge-ok">{{ layout.t("bulk.added") }}</span></a>
+            {% when Added::Exists %}<span class="badge badge-pending">{{ layout.t("bulk.exists") }}</span>
+            {% when Added::Invalid(key) %}<span class="badge badge-error">{{ layout.t("bulk.invalid") }}</span> <span class="small">{{ layout.t(key) }}</span>
+            {% endmatch %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form method="post" action="/repos/bulk#bulk" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("bulk.urls") }}</span>
+      <textarea name="urls" rows="8" required spellcheck="false" autocomplete="off" placeholder="https://github.com/owner/name&#10;git@gitlab.com:group/project.git">{{ bulk_urls }}</textarea>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("repo_new.interval") }}</span>
+      <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
+      <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
+      <span>{{ layout.t("repo_new.wiki") }}</span>
+    </label>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">{{ layout.t("bulk.submit") }}</button>
+    </div>
+  </form>
+</section>
 {% endblock %}

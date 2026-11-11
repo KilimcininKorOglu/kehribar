@@ -14,7 +14,7 @@ Pull requests, issues and Git LFS objects are not archived.
 
 ## Features
 
-- Add a repository by URL, or import every repository of a user, an organization, a GitLab group (with subgroups), a Bitbucket workspace or an Azure DevOps organization or project.
+- Add a repository by URL, many at once with one URL per line, or import every repository of a user, an organization, a GitLab group (with subgroups), a Bitbucket workspace or an Azure DevOps organization or project.
 - Watched sources: scheduled scans add the repositories that appear later. Forks are optional per source.
 - A global sync interval, a per-repository interval and a "sync now" button.
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
