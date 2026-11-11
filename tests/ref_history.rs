@@ -69,9 +69,12 @@ async fn sync(t: &TestApp) {
     assert_eq!(repo.status, RepoStatus::Ok, "{:?}", repo.last_error);
 }
 
-/// `(ref, kind, run id)` of every event, oldest first.
-async fn events(t: &TestApp) -> Vec<(String, String, Option<i64>)> {
-    sqlx::query_as("SELECT ref, kind, run_id FROM ref_events ORDER BY id")
+/// `(ref, kind, old_oid, new_oid, run_id)` of an event.
+type EventRow = (String, String, Option<String>, Option<String>, Option<i64>);
+
+/// Every event, oldest first.
+async fn rows(t: &TestApp) -> Vec<EventRow> {
+    sqlx::query_as("SELECT ref, kind, old_oid, new_oid, run_id FROM ref_events ORDER BY id")
         .fetch_all(&t.state.pool)
         .await
         .unwrap()
@@ -79,11 +82,11 @@ async fn events(t: &TestApp) -> Vec<(String, String, Option<i64>)> {
 
 /// The events after the first `skip`, as `(ref, kind)`.
 async fn new_events(t: &TestApp, skip: usize) -> Vec<(String, String)> {
-    events(t)
+    rows(t)
         .await
         .into_iter()
         .skip(skip)
-        .map(|(name, kind, _)| (name, kind))
+        .map(|(name, kind, ..)| (name, kind))
         .collect()
 }
 
@@ -102,10 +105,10 @@ async fn page(t: &TestApp, uri: &str) -> String {
 #[tokio::test]
 async fn syncs_record_branch_and_tag_changes_only() {
     let (t, source) = setup().await;
-    let first = events(&t).await;
+    let first = rows(&t).await;
     let baseline: Vec<_> = first
         .iter()
-        .map(|(n, k, r)| (n.as_str(), k.as_str(), *r))
+        .map(|(n, k, _, _, r)| (n.as_str(), k.as_str(), *r))
         .collect();
     // A baseline per branch and tag of the first sync; no pull or excluded ref.
     assert_eq!(
@@ -159,7 +162,7 @@ async fn syncs_record_branch_and_tag_changes_only() {
 
     // A sync without changes records nothing.
     sync(&t).await;
-    assert_eq!(events(&t).await.len(), 10);
+    assert_eq!(rows(&t).await.len(), 10);
 }
 
 #[tokio::test]
@@ -200,8 +203,39 @@ async fn history_page_shows_a_past_day() {
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }
 
-/// `(ref, kind, old_oid, new_oid, run_id)` of an event.
-type EventRow = (String, String, Option<String>, Option<String>, Option<i64>);
+#[tokio::test]
+async fn annotated_tags_record_their_commit() {
+    let (t, source) = setup().await;
+    let first = git_in(&source, &["rev-parse", "main"]);
+    git_in(&source, &["tag", "--annotate", "-m", "release", "v2"]);
+    sync(&t).await;
+    // The tag moves to a new commit: both ids are commits, not tag objects.
+    let second = commit_on(&source, "main", "next");
+    git_in(
+        &source,
+        &["tag", "--force", "--annotate", "-m", "again", "v2"],
+    );
+    sync(&t).await;
+    // The tag is deleted at the source.
+    git_in(&source, &["tag", "--delete", "v2"]);
+    sync(&t).await;
+
+    let tag: Vec<_> = rows(&t)
+        .await
+        .into_iter()
+        .filter(|row| row.0 == "refs/tags/v2")
+        .map(|(_, _, old, new, _)| (old, new))
+        .collect();
+    let some = |id: &str| Some(id.to_owned());
+    assert_eq!(
+        tag,
+        [
+            (None, some(&first)),
+            (some(&first), some(&second)),
+            (None, some(&second)),
+        ]
+    );
+}
 
 #[tokio::test]
 async fn an_archive_without_history_starts_from_its_kept_commits() {
@@ -219,24 +253,20 @@ async fn an_archive_without_history_starts_from_its_kept_commits() {
         .unwrap();
     sync(&t).await;
 
-    let rows: Vec<EventRow> =
-        sqlx::query_as("SELECT ref, kind, old_oid, new_oid, run_id FROM ref_events ORDER BY id")
-            .fetch_all(&t.state.pool)
-            .await
-            .unwrap();
-    assert_eq!(rows.len(), 5, "{rows:?}");
-    let (name, kind, old, new, run) = &rows[0];
+    let started = rows(&t).await;
+    assert_eq!(started.len(), 5, "{started:?}");
+    let (name, kind, old, new, run) = &started[0];
     assert_eq!(
         (name.as_str(), kind.as_str()),
         ("refs/heads/main", "rewritten")
     );
     assert_eq!(old.as_deref(), Some(old_main.as_str()));
     assert_eq!((new, run), (&None, &None));
-    assert!(rows[1..].iter().all(|r| r.1 == "baseline"));
+    assert!(started[1..].iter().all(|r| r.1 == "baseline"));
 
     // The next sync does not fill it again.
     sync(&t).await;
-    assert_eq!(events(&t).await.len(), 5);
+    assert_eq!(rows(&t).await.len(), 5);
 
     let yesterday = git_archive::web::format::date(unix_now() - DAY_SECONDS);
     let html = page(&t, &format!("/repos/1/history?at={yesterday}")).await;
