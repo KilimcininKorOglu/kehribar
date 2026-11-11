@@ -326,6 +326,15 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
     );
 }
 
+/// The error of listing the organization `team` with a token.
+async fn listing_error(provider: Provider, api_url: String, login: (&str, &str)) -> ProviderError {
+    let host = host(provider, api_url);
+    let token = creds(login.0, login.1);
+    list_repos(&host, Some(&token), SourceKind::Org, "team")
+        .await
+        .unwrap_err()
+}
+
 #[tokio::test]
 async fn a_redirect_to_another_server_never_gets_the_gitlab_token() {
     let api = MockServer::start().await;
@@ -341,11 +350,8 @@ async fn a_redirect_to_another_server_never_gets_the_gitlab_token() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .mount(&other)
         .await;
-    let host = host(Provider::Gitlab, format!("{}/api/v4", api.uri()));
-    let token = creds("git", "glpat-secret");
-    let err = list_repos(&host, Some(&token), SourceKind::User, "alice")
-        .await
-        .unwrap_err();
+    let api_url = format!("{}/api/v4", api.uri());
+    let err = listing_error(Provider::Gitlab, api_url, ("git", "glpat-secret")).await;
     assert!(
         matches!(err, ProviderError::Status { status: 302, .. }),
         "{err}"
@@ -458,11 +464,8 @@ async fn bitbucket_refuses_a_next_link_on_another_server() {
         )))
         .mount(&server)
         .await;
-    let host = host(Provider::Bitbucket, format!("{}/2.0", server.uri()));
-    let token = creds("alice", "app");
-    let err = list_repos(&host, Some(&token), SourceKind::Org, "team")
-        .await
-        .unwrap_err();
+    let api_url = format!("{}/2.0", server.uri());
+    let err = listing_error(Provider::Bitbucket, api_url, ("alice", "app")).await;
     assert!(matches!(err, ProviderError::ForeignPage(_)), "{err}");
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
