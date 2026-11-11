@@ -344,7 +344,12 @@ const PATTERNS: &[(&str, GitErrorKind)] = &[
     ("could not read username", GitErrorKind::AuthFailed),
     ("could not read password", GitErrorKind::AuthFailed),
     ("terminal prompts disabled", GitErrorKind::AuthFailed),
-    ("permission denied", GitErrorKind::AuthFailed),
+    // SSH refusals only: a bare "permission denied" is often the local disk.
+    ("permission denied (", GitErrorKind::AuthFailed),
+    (
+        "permission denied, please try again",
+        GitErrorKind::AuthFailed,
+    ),
     ("repository not found", GitErrorKind::NotFound),
     ("returned error: 404", GitErrorKind::NotFound),
     ("returned error: 410", GitErrorKind::NotFound),
@@ -648,6 +653,29 @@ mod tests {
             "{}",
             err.message
         );
+    }
+
+    #[test]
+    fn a_local_permission_error_is_not_a_refused_login() {
+        // The archive disk, not the source: never "repository gone".
+        for local in [
+            "error: unable to create temporary file: Permission denied\n\
+             fatal: failed to write object",
+            "fatal: Unable to create '/data/repos/x.git/shallow.lock': Permission denied",
+        ] {
+            assert_eq!(classify(local, false), GitErrorKind::Other, "{local}");
+            assert_eq!(classify(local, true), GitErrorKind::Other, "{local}");
+        }
+        for refused in [
+            "git@h: Permission denied (publickey,password).",
+            "Permission denied, please try again.",
+        ] {
+            assert_eq!(
+                classify(refused, true),
+                GitErrorKind::AuthFailed,
+                "{refused}"
+            );
+        }
     }
 
     #[tokio::test]
