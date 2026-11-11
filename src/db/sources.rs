@@ -1,6 +1,6 @@
 //! Watched users and organizations whose repositories are imported.
 
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteExecutor, SqlitePool};
 
 use crate::name_filter::NameFilter;
 
@@ -86,8 +86,8 @@ macro_rules! select_sources {
 
 /// Inserts a source. Returns `None` when the host already has a source of
 /// that kind and name.
-pub async fn insert(
-    pool: &SqlitePool,
+pub async fn insert<'e>(
+    db: impl SqliteExecutor<'e>,
     source: &NewSource<'_>,
     now: i64,
 ) -> sqlx::Result<Option<i64>> {
@@ -107,7 +107,25 @@ pub async fn insert(
     .bind(&options.exclude_patterns)
     .bind(options.use_ssh)
     .bind(now)
-    .fetch_optional(pool)
+    .fetch_optional(db)
+    .await
+}
+
+/// The id of the source of that kind and name on the host named `host`.
+pub async fn find_id<'e>(
+    db: impl SqliteExecutor<'e>,
+    host: &str,
+    kind: SourceKind,
+    name: &str,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar(
+        "SELECT s.id FROM sources s JOIN hosts h ON h.id = s.host_id \
+         WHERE h.host = ? AND s.kind = ? AND s.name = ?",
+    )
+    .bind(host)
+    .bind(kind)
+    .bind(name)
+    .fetch_optional(db)
     .await
 }
 

@@ -1,6 +1,6 @@
 //! Git servers with their provider type and default credentials.
 
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteExecutor, SqlitePool};
 
 text_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
@@ -83,6 +83,44 @@ pub async fn insert(pool: &SqlitePool, input: &HostInput<'_>, now: i64) -> sqlx:
     .bind(now)
     .bind(now)
     .fetch_one(pool)
+    .await
+}
+
+/// The values an imported host is created with: those of [`HostInput`] and
+/// the settings the host page edits on their own.
+#[derive(Debug, Clone)]
+pub struct ImportedHost<'a> {
+    pub input: HostInput<'a>,
+    pub ref_exclude: Option<&'a str>,
+    pub max_concurrency: Option<i64>,
+    /// The encrypted private key and the public key.
+    pub ssh_key: Option<(&'a [u8], &'a str)>,
+}
+
+/// Inserts an imported host. Returns `None` when a host of that name exists.
+pub async fn insert_imported<'e>(
+    db: impl SqliteExecutor<'e>,
+    host: &ImportedHost<'_>,
+    now: i64,
+) -> sqlx::Result<Option<i64>> {
+    let input = &host.input;
+    sqlx::query_scalar(
+        "INSERT INTO hosts (host, provider, api_base_url, username, token_enc, ref_exclude, \
+         max_concurrency, ssh_key_enc, ssh_public_key, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
+    )
+    .bind(input.host)
+    .bind(input.provider)
+    .bind(input.api_base_url)
+    .bind(input.username)
+    .bind(input.token_enc)
+    .bind(host.ref_exclude)
+    .bind(host.max_concurrency)
+    .bind(host.ssh_key.map(|(private, _)| private))
+    .bind(host.ssh_key.map(|(_, public)| public))
+    .bind(now)
+    .bind(now)
+    .fetch_optional(db)
     .await
 }
 
@@ -177,10 +215,13 @@ pub async fn get(pool: &SqlitePool, id: i64) -> sqlx::Result<Option<Host>> {
         .await
 }
 
-pub async fn find_by_host(pool: &SqlitePool, host: &str) -> sqlx::Result<Option<Host>> {
+pub async fn find_by_host<'e>(
+    db: impl SqliteExecutor<'e>,
+    host: &str,
+) -> sqlx::Result<Option<Host>> {
     sqlx::query_as(select_hosts!("WHERE host = ?"))
         .bind(host)
-        .fetch_optional(pool)
+        .fetch_optional(db)
         .await
 }
 

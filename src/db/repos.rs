@@ -1,6 +1,6 @@
 //! Archived repositories and their sync state.
 
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteExecutor, SqlitePool};
 
 use super::like_pattern;
 
@@ -111,7 +111,11 @@ macro_rules! select_repos {
 
 /// Inserts a repository due for an immediate first sync.
 /// Returns `None` when the URL or the host/owner/name path already exists.
-pub async fn insert(pool: &SqlitePool, repo: &NewRepo<'_>, now: i64) -> sqlx::Result<Option<i64>> {
+pub async fn insert<'e>(
+    db: impl SqliteExecutor<'e>,
+    repo: &NewRepo<'_>,
+    now: i64,
+) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar(
         "INSERT INTO repos (url, host, owner, name, source_id, username, token_enc, \
          interval_minutes, wiki_enabled, next_sync_at, created_at) \
@@ -128,7 +132,7 @@ pub async fn insert(pool: &SqlitePool, repo: &NewRepo<'_>, now: i64) -> sqlx::Re
     .bind(repo.wiki_enabled)
     .bind(now)
     .bind(now)
-    .fetch_optional(pool)
+    .fetch_optional(db)
     .await
 }
 
@@ -267,8 +271,8 @@ pub async fn schedule_now(pool: &SqlitePool, id: i64, now: i64) -> sqlx::Result<
     Ok(result.rows_affected() == 1)
 }
 
-pub async fn update_settings(
-    pool: &SqlitePool,
+pub async fn update_settings<'e>(
+    db: impl SqliteExecutor<'e>,
     id: i64,
     settings: RepoSettings<'_>,
 ) -> sqlx::Result<bool> {
@@ -281,7 +285,7 @@ pub async fn update_settings(
     .bind(settings.ref_exclude)
     .bind(settings.lfs_enabled)
     .bind(id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(result.rows_affected() == 1)
 }

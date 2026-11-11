@@ -26,6 +26,7 @@ Pull requests and issues are not archived. Git LFS objects are archived only for
 - Scheduled integrity checks (`git fsck`) and disk maintenance (`git repack`) of every archive.
 - Webhook and Telegram notifications when a repository, a source scan or the backup fails and when it works again.
 - Daily `git bundle` backups to S3-compatible storage (AWS S3, Cloudflare R2, Backblaze B2, MinIO and others).
+- Export of the hosts, sources and repositories to a JSON file, and import of that file into another installation.
 - One admin account, light and dark themes, Turkish and English.
 
 ## Quick start
@@ -191,6 +192,14 @@ git clone --mirror name-1794336958.bundle name.git
 mkdir -p name.git/lfs/objects/${oid:0:2}/${oid:2:2}
 cp <oid> name.git/lfs/objects/${oid:0:2}/${oid:2:2}/<oid>
 ```
+
+## Export and import
+
+"Download as JSON" on the settings page saves every host, source and repository with their settings to one file (`format: 1`). Tokens and SSH private keys are in the file as the base64 of their encrypted bytes, never in plain text. The Git data of the repositories is not in the file; use the backup for that.
+
+"Import" adds the records of such a file that the archive does not have. A host matches by its name, a source by host, type and name, and a repository by its URL or its archive path. An existing record stays as it is. Every record goes through the checks of its form, and the result page names each record as added, already there or invalid, with the reason.
+
+A secret works only in an installation with the same `GIT_ARCHIVE_SECRET_KEY`. A secret that does not decrypt with the key of the importing installation is left out: the record is added without it, the result page marks it, and the token or key must be entered again. The import runs in one database transaction, so a database error leaves no part of the file behind. The file may be up to 32 MB.
 
 ## Importing users and organizations
 

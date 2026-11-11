@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("transfer.result_title") }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/settings#transfer">{{ layout.t("settings.title") }}</a> / {{ layout.t("transfer.result_title") }}</nav>
+<section class="card">
+  <h1>{{ layout.t("transfer.result_title") }}</h1>
+  <p class="alert alert-ok" role="status">{{ layout.tf_number("transfer.summary", &added()) }}</p>
+  {% if without_secret() > 0 %}
+  <p class="alert alert-error" role="alert">{{ layout.tf_number("transfer.secrets_dropped", &without_secret()) }}</p>
+  {% endif %}
+  {% if rows.is_empty() %}
+  <p class="muted">{{ layout.t("transfer.empty") }}</p>
+  {% else %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ layout.t("transfer.col_kind") }}</th>
+          <th scope="col">{{ layout.t("transfer.col_name") }}</th>
+          <th scope="col">{{ layout.t("bulk.col_result") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ layout.t(row.kind.label_key()) }}</td>
+          <td class="mono small">{{ row.name }}</td>
+          <td>
+            {% match row.outcome %}
+            {% when Outcome::Added %}<span class="badge badge-ok">{{ layout.t("bulk.added") }}</span>
+            {% when Outcome::AddedWithoutSecret %}<span class="badge badge-pending">{{ layout.t("transfer.added_without_secret") }}</span>
+            {% when Outcome::Exists %}<span class="badge badge-pending">{{ layout.t("transfer.exists") }}</span>
+            {% when Outcome::Invalid(key) %}<span class="badge badge-error">{{ layout.t("bulk.invalid") }}</span> <span class="small">{{ layout.t(key) }}</span>
+            {% endmatch %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <div class="actions"><a class="btn" href="/settings#transfer">{{ layout.t("transfer.back") }}</a></div>
+</section>
+{% endblock %}

@@ -154,4 +154,19 @@
     </form>
   </div>
 </section>
+
+<section class="card form-card" id="transfer">
+  <h2>{{ layout.t("transfer.title") }}</h2>
+  <p class="muted">{{ layout.t("transfer.intro") }}</p>
+  <div class="actions"><a class="btn" href="/export.json" download>{{ layout.t("transfer.export") }}</a></div>
+  <form method="post" action="/import" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("transfer.file") }}</span>
+      <input name="file" type="file" accept="application/json,.json" required>
+      <small class="muted">{{ layout.t("transfer.file_help") }}</small>
+    </label>
+    <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("transfer.import") }}</button></div>
+  </form>
+</section>
 {% endblock %}

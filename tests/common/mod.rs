@@ -20,12 +20,22 @@ use tower::ServiceExt;
 pub const USER: &str = "admin";
 pub const PASSWORD: &str = "correct horse";
 
+/// The secret key of [`test_config`], 32 bytes in hex.
+pub fn test_secret_key() -> String {
+    "ab".repeat(32)
+}
+
 pub fn test_config(data_dir: &Path) -> Config {
+    config_with_key(data_dir, &test_secret_key())
+}
+
+pub fn config_with_key(data_dir: &Path, secret_key: &str) -> Config {
     let data_dir = data_dir.to_string_lossy().into_owned();
+    let secret_key = secret_key.to_owned();
     Config::from_lookup(move |name| match name {
         "GIT_ARCHIVE_ADMIN_USERNAME" => Some(USER.into()),
         "GIT_ARCHIVE_ADMIN_PASSWORD" => Some(PASSWORD.into()),
-        "GIT_ARCHIVE_SECRET_KEY" => Some("ab".repeat(32)),
+        "GIT_ARCHIVE_SECRET_KEY" => Some(secret_key.clone()),
         "GIT_ARCHIVE_DATA_DIR" => Some(data_dir.clone()),
         _ => None,
     })
@@ -94,9 +104,15 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::with_secret_key(&test_secret_key()).await
+    }
+
+    /// An application whose stored secrets use `secret_key` (64 hex digits).
+    pub async fn with_secret_key(secret_key: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = db::open_in_memory().await.unwrap();
-        let state = AppState::new(pool, test_config(dir.path()), Catalog::load().unwrap());
+        let config = config_with_key(dir.path(), secret_key);
+        let state = AppState::new(pool, config, Catalog::load().unwrap());
         let app = web::router(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))));
         let mut test = Self {
@@ -145,6 +161,46 @@ impl TestApp {
         request
             .headers_mut()
             .insert(header::COOKIE, self.cookie.parse().unwrap());
+        self.send(request).await
+    }
+
+    /// Posts a signed-in multipart form with one file field named `field`;
+    /// `with_csrf` puts the `_csrf` field before it.
+    pub async fn post_file(
+        &self,
+        uri: &str,
+        field: &str,
+        content: &[u8],
+        with_csrf: bool,
+    ) -> Response<Body> {
+        const BOUNDARY: &str = "test-boundary-7d1c";
+        let mut body = Vec::new();
+        if with_csrf {
+            body.extend_from_slice(
+                format!(
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"_csrf\"\r\n\r\n{}\r\n",
+                    self.csrf
+                )
+                .as_bytes(),
+            );
+        }
+        body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{field}\"; \
+                 filename=\"export.json\"\r\nContent-Type: application/json\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(content);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        let request = Request::post(uri)
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .header(header::COOKIE, &self.cookie)
+            .body(Body::from(body))
+            .unwrap();
         self.send(request).await
     }
 }

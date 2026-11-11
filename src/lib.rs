@@ -19,4 +19,5 @@ pub mod ref_filter;
 pub mod repo_url;
 pub mod settings;
 pub mod sync;
+pub mod transfer;
 pub mod web;

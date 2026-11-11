@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 askama = "0.16"
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["multipart"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
 chacha20poly1305 = { version = "0.11", features = ["getrandom"] }
 getrandom = "0.4"
@@ -32,6 +32,7 @@ ammonia = "4.2.4"
 tokio-util = { version = "0.7.20", features = ["io"] }
 base64 = "0.23"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+multer = "3.1"
 reqwest = { version = "0.13", features = ["json"] }
 rusty-s3 = "0.11"
 

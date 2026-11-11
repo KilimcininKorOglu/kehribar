@@ -1,6 +1,8 @@
 //! Cross-site request checks and response security headers.
 
-use axum::body::{Body, to_bytes};
+use std::convert::Infallible;
+
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, header};
 use axum::middleware::Next;
@@ -11,6 +13,9 @@ use crate::error::AppError;
 
 /// Largest form body the CSRF check reads.
 const MAX_FORM_BYTES: usize = 1024 * 1024;
+
+/// Largest file upload (multipart body), the size limit of an import file.
+pub const MAX_UPLOAD_BYTES: usize = 32 * 1024 * 1024;
 
 const CSRF_HEADER: &str = "x-csrf-token";
 const CSRF_FIELD: &str = "_csrf";
@@ -90,26 +95,53 @@ async fn check_token(
     Ok(next.run(request).await)
 }
 
-/// Reads `_csrf` from a URL-encoded body and puts the body back.
+/// Reads `_csrf` from a URL-encoded or multipart body and puts the body back.
 async fn read_form_token(request: Request) -> Result<(Request, Option<String>), AppError> {
-    let is_form = request
+    let content_type = request
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/x-www-form-urlencoded"));
-    if !is_form {
+        .unwrap_or_default()
+        .to_owned();
+    let boundary = multer::parse_boundary(&content_type).ok();
+    let is_form = content_type.starts_with("application/x-www-form-urlencoded");
+    if !is_form && boundary.is_none() {
         return Ok((request, None));
     }
+    let limit = if is_form {
+        MAX_FORM_BYTES
+    } else {
+        MAX_UPLOAD_BYTES
+    };
     let (parts, body) = request.into_parts();
-    let bytes = to_bytes(body, MAX_FORM_BYTES)
+    let bytes = to_bytes(body, limit)
         .await
         .map_err(|_| AppError::BadRequest(String::from("form body is too large")))?;
-    let fields: Vec<(String, String)> = serde_urlencoded::from_bytes(&bytes)
-        .map_err(|_| AppError::BadRequest(String::from("form body is malformed")))?;
-    let token = fields
-        .into_iter()
-        .find_map(|(name, value)| (name == CSRF_FIELD).then_some(value));
+    let token = match boundary {
+        Some(boundary) => multipart_token(bytes.clone(), boundary).await?,
+        None => urlencoded_token(&bytes)?,
+    };
     Ok((Request::from_parts(parts, Body::from(bytes)), token))
+}
+
+fn urlencoded_token(bytes: &[u8]) -> Result<Option<String>, AppError> {
+    let fields: Vec<(String, String)> = serde_urlencoded::from_bytes(bytes)
+        .map_err(|_| AppError::BadRequest(String::from("form body is malformed")))?;
+    Ok(fields
+        .into_iter()
+        .find_map(|(name, value)| (name == CSRF_FIELD).then_some(value)))
+}
+
+async fn multipart_token(bytes: Bytes, boundary: String) -> Result<Option<String>, AppError> {
+    let malformed = |_| AppError::BadRequest(String::from("form body is malformed"));
+    let stream = futures_util::stream::once(async move { Ok::<_, Infallible>(bytes) });
+    let mut multipart = multer::Multipart::new(stream, boundary);
+    while let Some(field) = multipart.next_field().await.map_err(malformed)? {
+        if field.name() == Some(CSRF_FIELD) {
+            return field.text().await.map(Some).map_err(malformed);
+        }
+    }
+    Ok(None)
 }
 
 /// Adds the security headers to every response.

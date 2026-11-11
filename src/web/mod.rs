@@ -16,6 +16,7 @@ pub mod security;
 pub mod settings_backup;
 pub mod settings_notify;
 pub mod settings_page;
+pub mod settings_transfer;
 pub mod sources;
 
 use std::io;
@@ -23,6 +24,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{any, get, post};
 use sqlx::SqlitePool;
@@ -139,6 +141,12 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/backup", post(settings_backup::save))
         .route("/settings/backup/test", post(settings_backup::test))
         .route("/settings/backup/run", post(settings_backup::run))
+        .route("/export.json", get(settings_transfer::export))
+        .route(
+            "/import",
+            post(settings_transfer::import)
+                .layer(DefaultBodyLimit::max(security::MAX_UPLOAD_BYTES)),
+        )
         .route("/logout", post(auth::logout))
         .layer(from_fn(security::verify_csrf))
         .layer(from_fn_with_state(state.clone(), auth::require_session));
