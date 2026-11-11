@@ -77,7 +77,15 @@ pub fn short_name(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-const COLUMNS: &str = "id, run_id, ref, old_oid, new_oid, kind, at";
+/// A `SELECT` of every event column from `$from`, built at compile time.
+macro_rules! select_events {
+    ($from:literal) => {
+        concat!(
+            "SELECT id, run_id, ref, old_oid, new_oid, kind, at FROM ",
+            $from
+        )
+    };
+}
 
 pub async fn has_any<'e>(db: impl SqliteExecutor<'e>, repo_id: i64) -> sqlx::Result<bool> {
     sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM ref_events WHERE repo_id = ?)")
@@ -155,31 +163,28 @@ pub async fn of_recent_runs(
     repo_id: i64,
     runs: i64,
 ) -> sqlx::Result<Vec<RefEvent>> {
-    let sql = format!(
-        "SELECT {COLUMNS} FROM ref_events WHERE run_id IN (SELECT id FROM sync_runs \
+    sqlx::query_as(select_events!(
+        "ref_events WHERE run_id IN (SELECT id FROM sync_runs \
          WHERE repo_id = ?1 ORDER BY started_at DESC, id DESC LIMIT ?2) ORDER BY ref, id"
-    );
-    // The statement holds constants only; every value is bound.
-    sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(repo_id)
-        .bind(runs)
-        .fetch_all(pool)
-        .await
+    ))
+    .bind(repo_id)
+    .bind(runs)
+    .fetch_all(pool)
+    .await
 }
 
 /// The last event of each ref up to `at` that names a commit: what each
 /// branch and tag pointed to at that time, as far as the history knows.
 pub async fn state_at(pool: &SqlitePool, repo_id: i64, at: i64) -> sqlx::Result<Vec<RefEvent>> {
-    let sql = format!(
-        "SELECT {COLUMNS} FROM (SELECT *, ROW_NUMBER() OVER \
+    sqlx::query_as(select_events!(
+        "(SELECT *, ROW_NUMBER() OVER \
          (PARTITION BY ref ORDER BY at DESC, id DESC) AS n FROM ref_events \
          WHERE repo_id = ? AND at <= ? AND new_oid IS NOT NULL) WHERE n = 1 ORDER BY ref"
-    );
-    sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(repo_id)
-        .bind(at)
-        .fetch_all(pool)
-        .await
+    ))
+    .bind(repo_id)
+    .bind(at)
+    .fetch_all(pool)
+    .await
 }
 
 /// For each ref, the first rewrite after `at` whose new commit is unknown:
@@ -189,17 +194,16 @@ pub async fn next_rewrites(
     repo_id: i64,
     at: i64,
 ) -> sqlx::Result<Vec<RefEvent>> {
-    let sql = format!(
-        "SELECT {COLUMNS} FROM (SELECT *, ROW_NUMBER() OVER \
+    sqlx::query_as(select_events!(
+        "(SELECT *, ROW_NUMBER() OVER \
          (PARTITION BY ref ORDER BY at, id) AS n FROM ref_events \
          WHERE repo_id = ? AND at > ? AND kind = 'rewritten' AND new_oid IS NULL) \
          WHERE n = 1 ORDER BY ref"
-    );
-    sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(repo_id)
-        .bind(at)
-        .fetch_all(pool)
-        .await
+    ))
+    .bind(repo_id)
+    .bind(at)
+    .fetch_all(pool)
+    .await
 }
 
 /// When the recording began: the time of the first `baseline` event.
@@ -218,17 +222,16 @@ pub async fn list_until(
     limit: i64,
     offset: i64,
 ) -> sqlx::Result<Vec<RefEvent>> {
-    let sql = format!(
-        "SELECT {COLUMNS} FROM ref_events WHERE repo_id = ? AND at <= ? \
+    sqlx::query_as(select_events!(
+        "ref_events WHERE repo_id = ? AND at <= ? \
          ORDER BY at DESC, id DESC LIMIT ? OFFSET ?"
-    );
-    sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(repo_id)
-        .bind(at)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
+    ))
+    .bind(repo_id)
+    .bind(at)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
 }
 
 pub async fn count_until(pool: &SqlitePool, repo_id: i64, at: i64) -> sqlx::Result<i64> {
