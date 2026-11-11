@@ -15,6 +15,7 @@ pub mod markdown;
 pub mod pages;
 pub mod prefs;
 pub mod repos;
+pub mod search;
 pub mod security;
 pub mod settings_backup;
 pub mod settings_notify;
@@ -121,6 +122,7 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/refs", get(browse::refs))
         .route("/repos/{id}/history", get(history::show))
         .route("/repos/{id}/compare", get(compare::show))
+        .route("/repos/{id}/search", get(search::show))
         .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))

@@ -1130,6 +1130,65 @@ pre.diff {
   margin: 1.25rem 0 0.5rem;
 }
 
+/* Code search */
+
+.search-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+}
+
+.search-query {
+  flex: 2 1 16rem;
+}
+
+.search-rev {
+  flex: 1 1 10rem;
+}
+
+.search-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding-bottom: 0.55rem;
+}
+
+.search-help {
+  margin: 0.75rem 0 0;
+}
+
+.search-summary {
+  margin: 1.25rem 0 0.5rem;
+}
+
+.search-lines {
+  margin: 0;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+  font: 0.85rem/1.5 var(--mono);
+}
+
+.search-line {
+  display: block;
+  padding: 0 1rem;
+  color: var(--text);
+  white-space: pre;
+}
+
+.search-line:hover {
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.search-number {
+  display: inline-block;
+  min-width: 3.5rem;
+  margin-right: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}
+
 /* Ref history */
 
 .date-form {

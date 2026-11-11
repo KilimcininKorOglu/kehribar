@@ -389,6 +389,82 @@ pub async fn count_ahead(git: &Git, dir: &Path, base: &str, head: &str) -> Resul
     Ok(String::from_utf8_lossy(&out).trim().parse().unwrap_or(0))
 }
 
+/// The output `grep` reads at most; past it the result is cut.
+const MAX_GREP_BYTES: usize = 4 * 1024 * 1024;
+/// A matching line longer than this is cut, so one line cannot fill a page.
+const MAX_GREP_LINE: usize = 400;
+
+/// One matching line of [`grep`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrepMatch {
+    pub path: String,
+    pub line: u64,
+    pub text: String,
+}
+
+/// How [`grep`] reads its pattern.
+#[derive(Debug, Clone, Copy)]
+pub struct GrepOptions<'a> {
+    pub pattern: &'a str,
+    /// An extended regular expression; else a fixed text.
+    pub regex: bool,
+    pub ignore_case: bool,
+}
+
+/// The lines of the text files of `commit` that match, at most `limit`,
+/// and whether more were found. Binary files are skipped. An invalid
+/// regular expression fails with exit code 128.
+pub async fn grep(
+    git: &Git,
+    dir: &Path,
+    commit: &str,
+    options: GrepOptions<'_>,
+    limit: usize,
+) -> Result<(Vec<GrepMatch>, bool), GitError> {
+    let mut args = vec!["grep", "-n", "-I", "--null", "--no-color"];
+    if options.ignore_case {
+        args.push("-i");
+    }
+    args.push(if options.regex { "-E" } else { "-F" });
+    // `-e` keeps a pattern that starts with `-` from being read as an option.
+    args.extend(["-e", options.pattern, commit, "--"]);
+    let out = match git.run_capped(dir, &args, MAX_GREP_BYTES).await {
+        Ok((out, cut)) => (out, cut),
+        // grep exits with 1 when nothing matches.
+        Err(err) if err.exit_code == Some(1) => return Ok((Vec::new(), false)),
+        Err(err) => return Err(err),
+    };
+    let text = String::from_utf8_lossy(&out.0);
+    let prefix = format!("{commit}:");
+    let mut matches: Vec<GrepMatch> = text
+        .lines()
+        .filter_map(|line| parse_grep_line(line, &prefix))
+        .take(limit + 1)
+        .collect();
+    let cut = out.1 || matches.len() > limit;
+    matches.truncate(limit);
+    Ok((matches, cut))
+}
+
+/// Reads `<commit>:<path>\0<line><sep><text>`; the separator after the
+/// line number is `\0` or `:`, depending on the Git version.
+fn parse_grep_line(line: &str, prefix: &str) -> Option<GrepMatch> {
+    let (name, rest) = line.split_once('\0')?;
+    let path = name.strip_prefix(prefix).unwrap_or(name);
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let number = rest.get(..digits)?.parse().ok()?;
+    let text = rest.get(digits + 1..).unwrap_or_default();
+    let text = match text.char_indices().nth(MAX_GREP_LINE) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    };
+    Some(GrepMatch {
+        path: path.to_owned(),
+        line: number,
+        text,
+    })
+}
+
 pub fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut in_hunks = false;
@@ -669,6 +745,30 @@ impl Blame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grep_lines_give_path_line_and_text() {
+        let both = [
+            "abc:dir/a b.txt\x0012\x00let x = 1;",
+            "abc:dir/a b.txt\x0012:let x = 1;",
+        ];
+        for line in both {
+            assert_eq!(
+                parse_grep_line(line, "abc:"),
+                Some(GrepMatch {
+                    path: "dir/a b.txt".into(),
+                    line: 12,
+                    text: "let x = 1;".into()
+                }),
+                "{line:?}"
+            );
+        }
+        let long = format!("abc:f\x001\x00{}", "é".repeat(MAX_GREP_LINE + 5));
+        let cut = parse_grep_line(&long, "abc:").unwrap();
+        assert_eq!(cut.text.chars().count(), MAX_GREP_LINE + 1);
+        assert!(cut.text.ends_with('…'));
+        assert_eq!(parse_grep_line("no separator", "abc:"), None);
+    }
 
     #[test]
     fn revisions_with_options_or_revision_syntax_are_refused() {

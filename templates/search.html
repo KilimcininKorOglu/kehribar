@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("search.title") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
+<div class="page-head">
+  <h1 class="repo-title"><a class="plain" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a></h1>
+</div>
+{% include "repo_tabs.html" %}
+
+<section class="card">
+  <form class="search-form" method="get" action="/repos/{{ repo.id }}/search" role="search">
+    <label class="field search-query">
+      <span>{{ layout.t("search.query") }}</span>
+      <input type="search" name="q" value="{{ query }}" spellcheck="false" autocomplete="off" required minlength="2">
+    </label>
+    <label class="field search-rev">
+      <span>{{ layout.t("search.rev") }}</span>
+      <input name="ref" value="{{ rev }}" placeholder="{% if let Some(branch) = repo.default_branch %}{{ branch }}{% endif %}" spellcheck="false" autocomplete="off">
+    </label>
+    <div class="search-options">
+      <label class="check"><input type="checkbox" name="regex" value="1"{% if regex %} checked{% endif %}><span>{{ layout.t("search.regex") }}</span></label>
+      <label class="check"><input type="checkbox" name="case" value="1"{% if case_sensitive %} checked{% endif %}><span>{{ layout.t("search.case") }}</span></label>
+    </div>
+    <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("search.submit") }}</button></div>
+  </form>
+  <p class="muted small search-help">{{ layout.t("search.help") }}</p>
+</section>
+
+{% if let Some(key) = problem %}
+<p class="alert alert-error" role="alert">{{ layout.t(key) }}</p>
+{% else if files.is_none() && !query.is_empty() %}
+<p class="alert alert-warn" role="status">{{ min_text() }}</p>
+{% endif %}
+
+{% if let Some(files) = files %}
+{% if files.is_empty() %}
+<section class="card search-summary"><p class="muted">{{ layout.t("search.none") }}</p></section>
+{% else %}
+<p class="muted small search-summary">{{ summary() }}</p>
+{% endif %}
+{% if cut %}<p class="alert alert-warn" role="status">{{ cut_text() }}</p>{% endif %}
+{% for file in files %}
+<section class="card file-card">
+  <div class="file-head"><span class="mono small"><strong>{{ file.path }}</strong></span></div>
+  <pre class="search-lines"><code>{% for found in file.matches %}<a class="search-line" href="{{ line_url(file.path, found.line) }}"><span class="search-number">{{ found.line }}</span>{{ found.text }}</a>{% endfor %}</code></pre>
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}
