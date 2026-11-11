@@ -79,6 +79,63 @@ mod tests {
         assert_eq!(like_pattern("a_b%c\\"), "%a\\_b\\%c\\\\%");
     }
 
+    /// Runs the migrations with versions in `versions` one by one.
+    async fn migrate(pool: &SqlitePool, versions: std::ops::RangeInclusive<i64>) {
+        for migration in MIGRATOR.iter().filter(|m| versions.contains(&m.version)) {
+            sqlx::raw_sql(migration.sql.clone())
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn rebuilding_hosts_and_sources_keeps_rows_and_links() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        migrate(&pool, 1..=6).await;
+        sqlx::raw_sql(
+            "INSERT INTO hosts (id, host, provider, created_at, updated_at, ref_exclude) \
+                 VALUES (4, 'github.com', 'github', 1, 2, 'refs/pull/*'); \
+             INSERT INTO sources (id, host_id, kind, name, created_at, include_forks, skip_archived) \
+                 VALUES (7, 4, 'org', 'octo', 3, 1, 1); \
+             INSERT INTO repos (id, url, host, owner, name, source_id, next_sync_at, created_at) \
+                 VALUES (9, 'https://github.com/octo/app', 'github.com', 'octo', 'app', 7, 0, 0);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        migrate(&pool, 7..=7).await;
+        let link: Option<i64> = sqlx::query_scalar("SELECT source_id FROM repos WHERE id = 9")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(link, Some(7));
+        let source = sources::get(&pool, 7).await.unwrap().unwrap();
+        assert!(source.include_forks && source.skip_archived);
+        let host = hosts::get(&pool, 4).await.unwrap().unwrap();
+        assert_eq!(host.ref_exclude.as_deref(), Some("refs/pull/*"));
+
+        // The new kinds are accepted, and the host still owns its sources.
+        sqlx::query("INSERT INTO sources (host_id, kind, name, created_at) VALUES (4, 'starred', 'alice', 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(hosts::delete(&pool, 4).await.unwrap());
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sources")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
     #[tokio::test]
     async fn file_database_is_created_and_migrated() {
         let dir = tempfile::tempdir().unwrap();
