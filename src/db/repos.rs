@@ -487,8 +487,11 @@ pub async fn reset_interrupted(pool: &SqlitePool) -> sqlx::Result<u64> {
     Ok(result.rows_affected())
 }
 
+/// Deletes the repository unless it is syncing; `false` when it was not
+/// deleted. The check and the delete are one statement, so a sync that
+/// claims the repository at the same time never loses its row.
 pub async fn delete(pool: &SqlitePool, id: i64) -> sqlx::Result<bool> {
-    let result = sqlx::query("DELETE FROM repos WHERE id = ?")
+    let result = sqlx::query("DELETE FROM repos WHERE id = ? AND status != 'syncing'")
         .bind(id)
         .execute(pool)
         .await?;

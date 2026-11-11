@@ -908,6 +908,9 @@ pub async fn delete(
         Some("repo.delete_busy")
     } else if form.confirm.trim() != full_name {
         Some("repo.delete_mismatch")
+    } else if !remove_repo(&ctx.state, &repo).await? {
+        // A sync claimed the repository after it was read.
+        Some("repo.delete_busy")
     } else {
         None
     };
@@ -916,20 +919,22 @@ pub async fn delete(
         let page = detail_page(&ctx, repo, None, Some(message)).await?;
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
     }
-    remove_repo(&ctx.state, &repo).await?;
     tracing::info!(url = %repo.url, "repository deleted with its archive");
     Ok(Redirect::to("/").into_response())
 }
 
 /// Deletes the record of a repository, its archive with the wiki, and the
-/// stored images that no repository uses any more.
-pub(super) async fn remove_repo(state: &AppState, repo: &Repo) -> Result<(), AppError> {
+/// stored images that no repository uses any more. Returns `false` and
+/// keeps everything when the repository is syncing.
+pub(super) async fn remove_repo(state: &AppState, repo: &Repo) -> Result<bool, AppError> {
     let dir = repo_url::archive_dir(&state.config.data_dir, &repo.host, &repo.owner, &repo.name);
-    repos::delete(&state.pool, repo.id).await?;
+    if !repos::delete(&state.pool, repo.id).await? {
+        return Ok(false);
+    }
     remove_dir(&mirror::wiki_dir(&dir)).await?;
     remove_dir(&dir).await?;
     sync_assets::remove_unused(&state.pool, &state.config).await?;
-    Ok(())
+    Ok(true)
 }
 
 async fn remove_dir(path: &std::path::Path) -> Result<(), AppError> {
@@ -953,5 +958,42 @@ mod tests {
         assert_eq!(notice_key(Some("credentials")), Some("cred.saved"));
         assert_eq!(notice_key(Some("<script>")), None);
         assert_eq!(notice_key(None), None);
+    }
+
+    #[tokio::test]
+    async fn a_repository_claimed_after_it_was_read_is_not_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().to_string_lossy().into_owned();
+        let config = crate::config::Config::from_lookup(|name| match name {
+            "GIT_ARCHIVE_ADMIN_USERNAME" | "GIT_ARCHIVE_ADMIN_PASSWORD" => Some("x".into()),
+            "GIT_ARCHIVE_SECRET_KEY" => Some("00".repeat(32)),
+            "GIT_ARCHIVE_DATA_DIR" => Some(data.clone()),
+            _ => None,
+        })
+        .unwrap();
+        let pool = crate::db::open_in_memory().await.unwrap();
+        let catalog = crate::i18n::Catalog::load().unwrap();
+        let state = AppState::new(pool, config, catalog);
+        let new = repos::NewRepo {
+            url: "https://example.com/team/app",
+            host: "example.com",
+            owner: "team",
+            name: "app",
+            source_id: None,
+            username: None,
+            token_enc: None,
+            interval_minutes: None,
+            wiki_enabled: false,
+        };
+        let id = repos::insert(&state.pool, &new, 1).await.unwrap().unwrap();
+        let read = repos::get(&state.pool, id).await.unwrap().unwrap();
+        let archive = repo_url::archive_dir(&state.config.data_dir, "example.com", "team", "app");
+        std::fs::create_dir_all(&archive).unwrap();
+        // The scheduler starts a sync between the read and the delete.
+        assert!(repos::claim(&state.pool, id, 2).await.unwrap());
+
+        assert!(!remove_repo(&state, &read).await.unwrap());
+        assert!(repos::get(&state.pool, id).await.unwrap().is_some());
+        assert!(archive.is_dir());
     }
 }

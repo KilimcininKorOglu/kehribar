@@ -265,14 +265,13 @@ pub async fn credentials(
 /// repository that is syncing now is refused.
 pub async fn delete(State(state): State<AppState>, Id(id): Id) -> ApiResult<StatusCode> {
     let repo = found(repos::get(&state.pool, id).await?)?;
-    if repo.status == RepoStatus::Syncing {
+    if repo.status == RepoStatus::Syncing || !remove_repo(&state, &repo).await? {
         return Err(ApiError::refused(
             &state,
             StatusCode::CONFLICT,
             "repo.delete_busy",
         ));
     }
-    remove_repo(&state, &repo).await?;
     tracing::info!(url = %repo.url, "repository deleted with its archive through the API");
     Ok(StatusCode::NO_CONTENT)
 }
