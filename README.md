@@ -178,7 +178,7 @@ Tokens with read access are enough:
 
 The username field may stay empty for GitHub, GitLab, Forgejo, Gitea, Gitee, Azure DevOps and SourceHut.
 
-An Azure DevOps source is an organization (every project) or `organization/project`. Repository URLs keep their `_git` segment for fetching, but the archive path leaves it out: `dev.azure.com/<org>/<project>/<name>`. This applies to `dev.azure.com`, `*.visualstudio.com` and every host whose record has the Azure DevOps provider; add such a record for Azure DevOps Server on its own address before adding its repositories. On other hosts `_git` is an ordinary group name and stays in the path. Disabled Azure DevOps repositories are skipped. A SourceHut source is a user, with or without its `~`. Gitee, Azure DevOps and SourceHut report no archived state, so "skip archived repositories" has no effect on them.
+An Azure DevOps source is an organization (every project) or `organization/project`. The archive path follows the URL path, `_git` segment included: `dev.azure.com/<org>/<project>/_git/<name>`. Azure DevOps Server on its own address works the same way, without a host record. Disabled Azure DevOps repositories are skipped. A SourceHut source is a user, with or without its `~`. Gitee, Azure DevOps and SourceHut report no archived state, so "skip archived repositories" has no effect on them.
 
 ## SSH
 

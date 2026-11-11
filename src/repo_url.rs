@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use url::Url;
 
-use crate::db::hosts::Provider;
-
 /// A validated repository URL split into the parts the archive path uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoLocation {
@@ -61,10 +59,6 @@ impl UrlError {
 /// `https://gist.github.com/<id>.git` and archived as `<user>/<id>`.
 pub const GIST_HOST: &str = "gist.github.com";
 
-/// The path segment before the repository name in Azure DevOps URLs:
-/// `https://dev.azure.com/<org>/<project>/_git/<name>`.
-const AZURE_GIT_SEGMENT: &str = "_git";
-
 /// The host whose settings and token a repository on `host` uses: gists
 /// use the ones of github.com.
 pub fn settings_host(host: &str) -> &str {
@@ -102,51 +96,6 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         owner: owners.join("/"),
         name: name.to_owned(),
     })
-}
-
-/// The location of `input` as the archive stores it: [`parse`], then
-/// [`for_provider`] with the provider of the host record.
-pub async fn locate<'e>(
-    db: impl sqlx::SqliteExecutor<'e>,
-    input: &str,
-) -> sqlx::Result<Result<RepoLocation, UrlError>> {
-    let location = match parse(input) {
-        Ok(location) => location,
-        Err(err) => return Ok(Err(err)),
-    };
-    let host = crate::db::hosts::find_by_host(db, settings_host(&location.host)).await?;
-    Ok(for_provider(location, host.map(|host| host.provider)))
-}
-
-/// Leaves out of the archive path the `_git` segment that Azure DevOps puts
-/// before the repository name, on Azure DevOps hosts only: elsewhere `_git`
-/// can be a real group. `provider` is the provider of the host record;
-/// without a record, dev.azure.com and visualstudio.com count as Azure
-/// DevOps. Azure DevOps Server on another address needs a host record.
-pub fn for_provider(
-    mut location: RepoLocation,
-    provider: Option<Provider>,
-) -> Result<RepoLocation, UrlError> {
-    let azure = provider.map_or_else(|| is_azure_cloud(&location.host), |p| p == Provider::Azure);
-    if !azure {
-        return Ok(location);
-    }
-    if location.owner == AZURE_GIT_SEGMENT {
-        return Err(UrlError::Path);
-    }
-    if let Some(owner) = location
-        .owner
-        .strip_suffix(&format!("/{AZURE_GIT_SEGMENT}"))
-    {
-        location.owner = owner.to_owned();
-    }
-    Ok(location)
-}
-
-/// The cloud addresses of Azure DevOps.
-fn is_azure_cloud(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    host == "dev.azure.com" || host.ends_with(".visualstudio.com")
 }
 
 /// The repository name of the last path segment, without `.git`.
@@ -504,53 +453,24 @@ mod tests {
     }
 
     #[test]
-    fn azure_devops_urls_are_archived_without_the_git_segment() {
-        let archived = |url: &str, provider| for_provider(parse(url).unwrap(), provider);
+    fn the_archive_path_follows_the_url_path_with_git_segments() {
+        // Azure DevOps cloud and Azure DevOps Server on its own address keep
+        // `_git` like any other path segment, so neither needs a rule.
         assert_eq!(
-            archived("https://dev.azure.com/fabrikam/Fiber/_git/App", None).unwrap(),
+            parse("https://dev.azure.com/fabrikam/Fiber/_git/App").unwrap(),
             location(
                 "https://dev.azure.com/fabrikam/Fiber/_git/App",
                 "dev.azure.com",
-                "fabrikam/Fiber",
+                "fabrikam/Fiber/_git",
                 "App"
             )
         );
-        // A repository named like its project has no project segment.
-        let parsed = archived("https://fabrikam.visualstudio.com/Fiber/_git/App", None).unwrap();
-        assert_eq!(
-            parsed.url,
-            "https://fabrikam.visualstudio.com/Fiber/_git/App"
-        );
-        assert_eq!(parsed.owner, "Fiber");
-        assert_eq!(
-            archived("https://dev.azure.com/fabrikam/_git/Fiber", None).map(|l| (l.owner, l.name)),
-            Ok(("fabrikam".to_owned(), "Fiber".to_owned()))
-        );
-        assert_eq!(
-            archived("https://dev.azure.com/_git/App", None),
-            Err(UrlError::Path)
-        );
-        // Azure DevOps Server on its own address, known by its host record.
-        let server = "https://tfs.example.com/tfs/Main/Fiber/_git/App";
-        assert_eq!(
-            archived(server, Some(Provider::Azure)).unwrap().owner,
-            "tfs/Main/Fiber"
-        );
-        // Elsewhere `_git` is a group like any other, so two repositories
-        // never share an archive path.
-        for provider in [None, Some(Provider::Gitlab)] {
-            let grouped = archived("https://gitlab.example.com/team/_git/app", provider).unwrap();
-            let plain = archived("https://gitlab.example.com/team/app", provider).unwrap();
-            assert_eq!(grouped.owner, "team/_git");
-            assert_ne!(grouped.owner, plain.owner);
-        }
-        // A host record of another provider wins over the cloud address.
-        assert_eq!(
-            archived("https://dev.azure.com/o/p/_git/r", Some(Provider::Generic))
-                .unwrap()
-                .owner,
-            "o/p/_git"
-        );
+        let server = parse("https://tfs.example.com/tfs/Main/Fiber/_git/App").unwrap();
+        assert_eq!(server.owner, "tfs/Main/Fiber/_git");
+        // A GitLab group named `_git` never shares a path with its parent.
+        let grouped = parse("https://gitlab.example.com/team/_git/app").unwrap();
+        let plain = parse("https://gitlab.example.com/team/app").unwrap();
+        assert_ne!(grouped.owner, plain.owner);
     }
 
     #[test]

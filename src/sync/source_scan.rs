@@ -189,9 +189,6 @@ async fn add(
         }
         _ => return Ok(Added::Foreign),
     };
-    let Ok(location) = repo_url::for_provider(location, Some(host.provider)) else {
-        return Ok(Added::Foreign);
-    };
     if !accepts(source, remote, &location.name) {
         return Ok(Added::Filtered);
     }

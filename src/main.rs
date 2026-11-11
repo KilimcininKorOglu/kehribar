@@ -47,19 +47,12 @@ async fn build_state(config: Config) -> Result<AppState, Box<dyn Error>> {
             "syncs interrupted by the last shutdown will run again"
         );
     }
-    tidy_disk(&pool, &config).await?;
+    tidy_disk(&config)?;
     Ok(AppState::new(pool, config, Catalog::load()?))
 }
 
 /// Brings the data directory in line before any sync runs.
-async fn tidy_disk(pool: &sqlx::SqlitePool, config: &Config) -> Result<(), Box<dyn Error>> {
-    let relocated = git_archive::sync::relocate::git_segment_paths(pool, &config.data_dir).await?;
-    if relocated > 0 {
-        tracing::info!(
-            relocated,
-            "archives moved to the path of their host's provider"
-        );
-    }
+fn tidy_disk(config: &Config) -> Result<(), Box<dyn Error>> {
     // A private key that a killed process left must not stay on the disk.
     let keys = git_archive::git::ssh::remove_leftovers(&config.tmp_dir())?;
     if keys > 0 {

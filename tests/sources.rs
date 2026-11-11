@@ -373,7 +373,7 @@ async fn an_azure_project_source_archives_repositories_under_the_project() {
     assert_eq!(repo.url, "https://dev.azure.com/fabrikam/Fiber/_git/App");
     assert_eq!(
         (repo.owner.as_str(), repo.name.as_str()),
-        ("fabrikam/Fiber", "App")
+        ("fabrikam/Fiber/_git", "App")
     );
 }
 

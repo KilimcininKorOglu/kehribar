@@ -455,8 +455,7 @@ async fn import_repo(
         name: entry.url.clone(),
         outcome,
     };
-    // Hosts are imported first, so their providers decide the archive path.
-    let location = match repo_url::locate(&mut *conn, &entry.url).await? {
+    let location = match repo_url::parse(&entry.url) {
         Ok(location) => location,
         Err(err) => return Ok(row(Outcome::Invalid(err.message_key()))),
     };
