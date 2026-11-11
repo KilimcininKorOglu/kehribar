@@ -124,7 +124,11 @@ async fn authenticate(state: &AppState, ip: IpAddr, headers: &HeaderMap) -> Resu
         Denied::Failed
     })?;
     if let Some(caller) = caller {
-        state.limiter.reset(ip);
+        // Only the admin password clears the failures: a token holder must
+        // not be able to reset the count between guesses at that password.
+        if matches!(caller, Caller::Admin) {
+            state.limiter.reset(ip);
+        }
         return Ok(caller);
     }
     state.limiter.record_failure(ip, now);

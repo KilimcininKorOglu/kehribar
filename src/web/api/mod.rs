@@ -231,7 +231,8 @@ async fn authenticate(
         let message = "Send a valid API token in the Authorization: Bearer header.";
         return ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", message).into_response();
     };
-    state.limiter.reset(ip);
+    // A valid token does not clear the failures of the address; only the
+    // admin password does, so a token cannot reset guesses at it.
     let reads = matches!(*request.method(), Method::GET | Method::HEAD);
     if !reads && !token.can_write {
         let message = "This token may only read.";

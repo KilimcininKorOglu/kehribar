@@ -112,6 +112,36 @@ async fn guessing_tokens_locks_the_caller_out() {
     assert_eq!(json["error"]["code"], "locked");
 }
 
+/// A wrong admin password on the login form.
+async fn wrong_login(t: &TestApp) -> StatusCode {
+    let body = "username=admin&password=guess";
+    send(&t.app, common::form_request("/login", body))
+        .await
+        .status()
+}
+
+#[tokio::test]
+async fn a_valid_token_does_not_clear_password_failures() {
+    let t = TestApp::new().await;
+    let reader = read_token(&t).await;
+    let clone = create_token(&t, "kind=clone&name=c&scope=all").await;
+    let basic = format!("Basic {}", base64_of(&format!("x:{clone}")));
+    for _ in 1..MAX_FAILED_LOGINS {
+        assert_eq!(wrong_login(&t).await, StatusCode::UNAUTHORIZED);
+    }
+    // Both tokens still work, and neither resets the count of the address.
+    get(&t, "/repos", &reader).await;
+    let git = common::auth_request("GET", "/git/a/b/c.git/info/refs", Some(&basic));
+    assert_eq!(send(&t.app, git).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(wrong_login(&t).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong_login(&t).await, StatusCode::TOO_MANY_REQUESTS);
+}
+
+fn base64_of(text: &str) -> String {
+    use base64::prelude::{BASE64_STANDARD, Engine as _};
+    BASE64_STANDARD.encode(text)
+}
+
 /// The names of the repositories of a list answer.
 fn names(json: &Value) -> Vec<&str> {
     json["repos"]
