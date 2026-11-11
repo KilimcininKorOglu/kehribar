@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use reqwest::header::{CONTENT_TYPE, LOCATION};
 use reqwest::redirect::Policy;
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use url::{Host, Url};
 
 use super::SyncContext;
@@ -273,9 +274,30 @@ async fn store(dir: &Path, image: &Image) -> std::io::Result<String> {
     let mut suffix = [0u8; 8];
     getrandom::fill(&mut suffix).map_err(std::io::Error::other)?;
     let part = dir.join(format!(".{hash}.{}.part", sha256_hex(&suffix)));
-    tokio::fs::write(&part, &image.data).await?;
-    tokio::fs::rename(&part, &file).await?;
+    write_part(&part, &file, &image.data).await?;
     Ok(hash)
+}
+
+/// [`write_durably`], and on failure the removal of the part file: the
+/// sweep of unused images skips part files, so nothing else removes it.
+async fn write_part(part: &Path, file: &Path, data: &[u8]) -> std::io::Result<()> {
+    let Err(err) = write_durably(part, file, data).await else {
+        return Ok(());
+    };
+    if let Err(remove) = tokio::fs::remove_file(part).await
+        && remove.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(path = %part.display(), error = %remove, "part file not removed");
+    }
+    Err(err)
+}
+
+/// Writes `data` to `part` and renames it to `file`.
+async fn write_durably(part: &Path, file: &Path, data: &[u8]) -> std::io::Result<()> {
+    let mut out = tokio::fs::File::create(part).await?;
+    out.write_all(data).await?;
+    drop(out);
+    tokio::fs::rename(part, file).await
 }
 
 /// Sets the modification time of a stored image to now. A sync that
@@ -562,6 +584,18 @@ mod tests {
         assert_eq!(store(dir.path(), &image).await.unwrap(), hash);
         assert_eq!(std::fs::read(dir.path().join(&hash)).unwrap(), image.data);
         assert_eq!(std::fs::read(&other).unwrap(), b"png");
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_leaves_no_part_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A non-empty directory under the final name makes the rename fail.
+        let file = dir.path().join("target");
+        std::fs::create_dir(&file).unwrap();
+        std::fs::write(file.join("x"), b"").unwrap();
+        let part = dir.path().join(".target.part");
+        assert!(write_part(&part, &file, b"png").await.is_err());
+        assert!(!part.exists());
     }
 
     #[tokio::test]
