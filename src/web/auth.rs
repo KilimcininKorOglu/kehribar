@@ -55,6 +55,13 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
+/// The credentials of an `Authorization` value that uses `scheme`. The
+/// scheme name is case-insensitive (RFC 9110), so `bearer` works too.
+pub fn auth_param<'a>(value: &'a HeaderValue, scheme: &str) -> Option<&'a str> {
+    let (name, param) = value.to_str().ok()?.split_once(' ')?;
+    name.eq_ignore_ascii_case(scheme).then(|| param.trim())
+}
+
 /// Compares two secrets in constant time. Hashing first hides their lengths.
 pub fn secrets_equal(a: &str, b: &str) -> bool {
     let a = Sha256::digest(a.as_bytes());

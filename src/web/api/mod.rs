@@ -184,7 +184,7 @@ where
 
 /// The API token of a `Bearer` header value, if it looks like one.
 fn bearer(value: Option<&HeaderValue>) -> Option<&str> {
-    let token = value?.to_str().ok()?.strip_prefix("Bearer ")?.trim();
+    let token = super::auth::auth_param(value?, "Bearer")?;
     token.starts_with(API_PREFIX).then_some(token)
 }
 

@@ -138,11 +138,8 @@ async fn authenticate(state: &AppState, ip: IpAddr, headers: &HeaderMap) -> Resu
 
 /// `(user, password)` of a Basic `Authorization` value.
 fn basic_credentials(value: &HeaderValue) -> Option<(String, String)> {
-    let decoded = value
-        .to_str()
-        .ok()?
-        .strip_prefix("Basic ")
-        .and_then(|encoded| BASE64_STANDARD.decode(encoded.trim()).ok())
+    let decoded = super::auth::auth_param(value, "Basic")
+        .and_then(|encoded| BASE64_STANDARD.decode(encoded).ok())
         .and_then(|bytes| String::from_utf8(bytes).ok())?;
     let (user, password) = decoded.split_once(':')?;
     Some((user.to_owned(), password.to_owned()))
@@ -273,6 +270,26 @@ fn internal(err: &dyn std::fmt::Display) -> StatusCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_basic_scheme_name_is_case_insensitive() {
+        // "admin:pw"
+        for value in [
+            "Basic YWRtaW46cHc=",
+            "basic YWRtaW46cHc=",
+            "BASIC  YWRtaW46cHc=",
+        ] {
+            assert_eq!(
+                basic_credentials(&HeaderValue::from_static(value)),
+                Some(("admin".to_owned(), "pw".to_owned())),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            basic_credentials(&HeaderValue::from_static("Bearer YWRtaW46cHc=")),
+            None
+        );
+    }
 
     #[test]
     fn only_upload_pack_requests_are_routed() {

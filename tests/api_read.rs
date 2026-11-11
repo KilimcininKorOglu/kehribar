@@ -55,6 +55,14 @@ async fn requests_need_a_valid_api_token() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(json["error"]["code"], "no_route");
 
+    // The scheme name is case-insensitive, as HTTP defines it.
+    let mut lower = api_request("GET", "/repos", None, None);
+    lower.headers_mut().insert(
+        header::AUTHORIZATION,
+        format!("bearer {reader}").parse().unwrap(),
+    );
+    assert_eq!(send(&t.app, lower).await.status(), StatusCode::OK);
+
     // A read-only token may not change anything.
     let (status, json) = call(&t, "POST", "/repos", Some(&reader)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
