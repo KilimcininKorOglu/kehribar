@@ -58,7 +58,7 @@ pub fn relative(tr: &Tr, now: i64, ts: i64) -> String {
         .find(|(limit, ..)| distance < *limit)
         .unwrap_or(RELATIVE_STEPS[2]);
     let key = if diff >= 0 { past } else { future };
-    tr.tf(key, &[("n", &(distance / unit).to_string())])
+    tr.tf_count(key, distance / unit)
 }
 
 /// `12 sn`, `3 dk 5 sn`.
@@ -125,6 +125,8 @@ mod tests {
         assert_eq!(relative(&tr, now, now + 3_600 * 5), "in 5 h");
         assert_eq!(relative(&tr, now, now + 10), "soon");
         assert_eq!(relative(&tr, now, now - 29 * 86_400), "29 days ago");
+        assert_eq!(relative(&tr, now, now - 86_400), "1 day ago");
+        assert_eq!(relative(&tr, now, now + 86_400), "in 1 day");
         // 1_700_000_000 is 2023-11-14; a month or more shows the date.
         assert_eq!(
             relative(&tr, 1_700_000_000 + 31 * 86_400, 1_700_000_000),

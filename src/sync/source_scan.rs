@@ -94,8 +94,13 @@ async fn scan_host(ctx: &SyncContext, source: &Source, host: &Host) -> sqlx::Res
     }
     if !foreign.is_empty() {
         // Shown on the sources page, so a wrong API URL does not lose repositories unnoticed.
+        let noun = if foreign.len() == 1 {
+            "repository"
+        } else {
+            "repositories"
+        };
         report.error = Some(format!(
-            "{} repositories skipped, their clone URL is not on {}: {}",
+            "{} {noun} skipped, the clone URL is not on {}: {}",
             foreign.len(),
             host.host,
             foreign.join(", ")

@@ -76,9 +76,9 @@ impl Layout {
     // The helpers below take references, because askama passes every
     // template argument by reference.
 
-    /// The message for `key` with `{n}` replaced by `n`.
+    /// The message for `key` with `{n}` replaced by `n`, singular for one.
     pub fn tf_number(&self, key: &str, n: &i64) -> String {
-        self.tr.tf(key, &[("n", &n.to_string())])
+        self.tr.tf_count(key, *n)
     }
 
     /// The CSRF token for hidden form fields; empty on public pages.

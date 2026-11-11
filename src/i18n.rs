@@ -86,6 +86,19 @@ impl Tr {
                 text.replace(&format!("{{{name}}}"), value)
             })
     }
+
+    /// Returns the message for `key` with `{n}` replaced by `n`. For a count
+    /// of one, the singular `{key}_one` is used when the catalog has it.
+    pub fn tf_count(&self, key: &str, n: i64) -> String {
+        let singular = format!("{key}_one");
+        let messages = self.catalog.messages(self.lang);
+        let key = if n == 1 && messages.contains_key(&singular) {
+            singular.as_str()
+        } else {
+            key
+        };
+        self.tf(key, &[("n", &n.to_string())])
+    }
 }
 
 fn parse(file: &'static str, source: &str) -> Result<HashMap<String, String>, LocaleError> {
@@ -136,15 +149,37 @@ mod tests {
         Arc::new(Catalog::load().unwrap())
     }
 
+    /// The keys of a catalog without the singular `_one` forms, which a
+    /// language without them (Turkish) leaves out.
+    fn base_keys(messages: &HashMap<String, String>) -> BTreeSet<&String> {
+        messages
+            .keys()
+            .filter(|key| !key.ends_with("_one"))
+            .collect()
+    }
+
     #[test]
     fn both_catalogs_define_the_same_keys() {
         let catalog = catalog();
-        let tr: BTreeSet<_> = catalog.tr.keys().collect();
-        let en: BTreeSet<_> = catalog.en.keys().collect();
+        let tr = base_keys(&catalog.tr);
+        let en = base_keys(&catalog.en);
         let only_tr: Vec<_> = tr.difference(&en).collect();
         let only_en: Vec<_> = en.difference(&tr).collect();
         assert!(only_tr.is_empty(), "missing in en.toml: {only_tr:?}");
         assert!(only_en.is_empty(), "missing in tr.toml: {only_en:?}");
+    }
+
+    #[test]
+    fn every_singular_form_has_its_plural_key() {
+        let catalog = catalog();
+        for messages in [&catalog.tr, &catalog.en] {
+            let orphans: Vec<_> = messages
+                .keys()
+                .filter_map(|key| key.strip_suffix("_one"))
+                .filter(|base| !messages.contains_key(*base))
+                .collect();
+            assert!(orphans.is_empty(), "singular without plural: {orphans:?}");
+        }
     }
 
     fn files_with_ext(dir: &Path, ext: &str, out: &mut Vec<std::path::PathBuf>) {
@@ -222,6 +257,27 @@ mod tests {
             "Sign out"
         );
         assert_eq!(Tr::new(catalog, Lang::En).t("no.such.key"), "no.such.key");
+    }
+
+    #[test]
+    fn a_count_of_one_uses_the_singular_message() {
+        let en = Tr::new(catalog(), Lang::En);
+        assert_eq!(
+            en.tf_count("repos.count", 1),
+            "1 repository in the archive."
+        );
+        assert_eq!(
+            en.tf_count("repos.count", 2),
+            "2 repositories in the archive."
+        );
+        assert_eq!(
+            en.tf_count("repos.count", 0),
+            "0 repositories in the archive."
+        );
+        // A key without a singular form keeps its text for every count.
+        assert_eq!(en.tf_count("time.minutes_ago", 1), "1 min ago");
+        let tr = Tr::new(catalog(), Lang::Tr);
+        assert_eq!(tr.tf_count("repos.count", 1), "Arşivde 1 repo var.");
     }
 
     #[test]

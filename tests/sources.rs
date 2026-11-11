@@ -300,6 +300,14 @@ async fn repositories_on_another_host_are_reported_not_added() {
     let error = scanned.last_error.unwrap();
     assert!(error.starts_with("2 repositories skipped"), "{error}");
     assert!(error.contains("https://mirror.example/octo/other.git"));
+
+    list_answers(
+        &server,
+        json!([repo("https://mirror.example/octo/other.git", false)]),
+    )
+    .await;
+    let error = scan(&t, source.id).await.last_error.unwrap();
+    assert!(error.starts_with("1 repository skipped"), "{error}");
 }
 
 #[tokio::test]
