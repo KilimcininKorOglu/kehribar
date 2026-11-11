@@ -261,8 +261,10 @@ pub fn is_hash(name: &str) -> bool {
 async fn store(dir: &Path, image: &Image) -> std::io::Result<String> {
     let hash = sha256_hex(&image.data);
     let file = dir.join(&hash);
-    if tokio::fs::try_exists(&file).await? {
-        return Ok(hash);
+    match touch(&file).await {
+        Ok(()) => return Ok(hash),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
     }
     tokio::fs::create_dir_all(dir).await?;
     // Written beside its final name and renamed, so a reader never sees a
@@ -274,6 +276,21 @@ async fn store(dir: &Path, image: &Image) -> std::io::Result<String> {
     tokio::fs::write(&part, &image.data).await?;
     tokio::fs::rename(&part, &file).await?;
     Ok(hash)
+}
+
+/// Sets the modification time of a stored image to now. A sync that
+/// removes unused images may have read the used ones before this sync
+/// records the image; the fresh time keeps the file for [`UNUSED_GRACE`].
+async fn touch(file: &Path) -> std::io::Result<()> {
+    let handle = tokio::fs::OpenOptions::new()
+        .write(true)
+        .open(file)
+        .await?
+        .into_std()
+        .await;
+    tokio::task::spawn_blocking(move || handle.set_modified(SystemTime::now()))
+        .await
+        .map_err(std::io::Error::other)?
 }
 
 /// External image URLs in the order they were found, without repeats.
@@ -545,5 +562,30 @@ mod tests {
         assert_eq!(store(dir.path(), &image).await.unwrap(), hash);
         assert_eq!(std::fs::read(dir.path().join(&hash)).unwrap(), image.data);
         assert_eq!(std::fs::read(&other).unwrap(), b"png");
+    }
+
+    #[tokio::test]
+    async fn storing_an_existing_image_renews_its_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = Image {
+            data: b"png bytes".to_vec(),
+            content_type: "image/png".to_owned(),
+        };
+        let file = dir.path().join(sha256_hex(&image.data));
+        std::fs::write(&file, &image.data).unwrap();
+        let old = SystemTime::now() - 2 * UNUSED_GRACE;
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        store(dir.path(), &image).await.unwrap();
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default();
+        assert!(age < UNUSED_GRACE, "{age:?}");
     }
 }
