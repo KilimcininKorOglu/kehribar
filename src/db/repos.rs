@@ -183,13 +183,28 @@ text_enum! {
     }
 }
 
-/// Matches the search term of [`list`] and an optional status.
-const FILTER: &str = "WHERE (url LIKE ?1 ESCAPE '\\' OR (owner || '/' || name) LIKE ?1 ESCAPE '\\') \
-     AND (?2 IS NULL OR status = ?2)";
+/// One list page statement for the `ORDER BY` key `$order`, built at
+/// compile time: the search term of [`list`] (`?1`), an optional status
+/// (`?2`), the page size (`?3`) and the offset (`?4`).
+macro_rules! page_sql {
+    ($($order:expr),+) => {
+        concat!(
+            select_repos!(""),
+            "WHERE (url LIKE ?1 ESCAPE '\\' OR (owner || '/' || name) LIKE ?1 ESCAPE '\\') \
+             AND (?2 IS NULL OR status = ?2) ORDER BY ",
+            $($order),+,
+            " LIMIT ?3 OFFSET ?4"
+        )
+    };
+}
 
 /// Problems first, then work in progress, then the repositories that are up to date.
-const STATUS_RANK: &str = "CASE status WHEN 'error' THEN 0 WHEN 'unreachable' THEN 1 \
-     WHEN 'syncing' THEN 2 WHEN 'pending' THEN 3 ELSE 4 END";
+macro_rules! status_rank {
+    () => {
+        "CASE status WHEN 'error' THEN 0 WHEN 'unreachable' THEN 1 \
+         WHEN 'syncing' THEN 2 WHEN 'pending' THEN 3 ELSE 4 END"
+    };
+}
 
 /// One page of the repository list.
 #[derive(Debug, Clone)]
@@ -203,31 +218,29 @@ pub struct ListFilter<'a> {
 }
 
 impl ListFilter<'_> {
-    /// The `ORDER BY` clause, built only from fixed column names.
-    fn order_by(&self) -> String {
-        let dir = if self.descending { "DESC" } else { "ASC" };
-        let key = match self.sort {
-            RepoSort::Name => format!("host {dir}, owner {dir}, name {dir}"),
-            RepoSort::Size => format!("size_bytes {dir}, host, owner, name"),
+    /// The statement of this sort; each one is a fixed text.
+    fn sql(&self) -> &'static str {
+        match (self.sort, self.descending) {
+            (RepoSort::Name, false) => page_sql!("host, owner, name"),
+            (RepoSort::Name, true) => page_sql!("host DESC, owner DESC, name DESC"),
+            (RepoSort::Size, false) => page_sql!("size_bytes, host, owner, name"),
+            (RepoSort::Size, true) => page_sql!("size_bytes DESC, host, owner, name"),
             // Never synced repositories come last in both directions.
-            RepoSort::Synced => {
-                format!("last_sync_at IS NULL, last_sync_at {dir}, host, owner, name")
+            (RepoSort::Synced, false) => {
+                page_sql!("last_sync_at IS NULL, last_sync_at, host, owner, name")
             }
-            RepoSort::Status => format!("{STATUS_RANK} {dir}, host, owner, name"),
-        };
-        format!("ORDER BY {key}")
+            (RepoSort::Synced, true) => {
+                page_sql!("last_sync_at IS NULL, last_sync_at DESC, host, owner, name")
+            }
+            (RepoSort::Status, false) => page_sql!(status_rank!(), ", host, owner, name"),
+            (RepoSort::Status, true) => page_sql!(status_rank!(), " DESC, host, owner, name"),
+        }
     }
 }
 
 /// The repositories of one list page.
 pub async fn page(pool: &SqlitePool, filter: &ListFilter<'_>) -> sqlx::Result<Vec<Repo>> {
-    let sql = format!(
-        "{} {FILTER} {} LIMIT ?3 OFFSET ?4",
-        select_repos!(""),
-        filter.order_by()
-    );
-    // The statement holds constants only; every value is bound.
-    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+    sqlx::query_as(filter.sql())
         .bind(like_pattern(filter.search.trim()))
         .bind(filter.status)
         .bind(filter.limit)
