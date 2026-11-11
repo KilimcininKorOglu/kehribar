@@ -327,6 +327,33 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
 }
 
 #[tokio::test]
+async fn a_redirect_to_another_server_never_gets_the_gitlab_token() {
+    let api = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/steal", other.uri()).as_str()),
+        )
+        .mount(&api)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&other)
+        .await;
+    let host = host(Provider::Gitlab, format!("{}/api/v4", api.uri()));
+    let token = creds("git", "glpat-secret");
+    let err = list_repos(&host, Some(&token), SourceKind::User, "alice")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ProviderError::Status { status: 302, .. }),
+        "{err}"
+    );
+    assert!(other.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn forgejo_pages_by_fifty_with_a_token_header() {
     let server = MockServer::start().await;
     let repo =

@@ -14,6 +14,7 @@ mod sourcehut;
 use std::time::Duration;
 
 use reqwest::header::HeaderMap;
+use reqwest::redirect::Policy;
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -301,12 +302,41 @@ fn connect(host: &Host, credentials: Option<&Credentials>) -> Result<Api, Provid
     let client = Client::builder()
         .user_agent(concat!("git-archive/", env!("CARGO_PKG_VERSION")))
         .timeout(TIMEOUT)
+        .redirect(redirect_policy())
         .build()?;
     Ok(Api {
         client,
         base,
         auth: auth(host.provider, credentials),
     })
+}
+
+/// Redirects a list request follows at most.
+const MAX_REDIRECTS: usize = 10;
+
+/// Follows a redirect only to the origin of the first request, or to https
+/// on its host. reqwest drops the standard credential headers on another
+/// host, but not GitLab's `PRIVATE-TOKEN`; a stopped redirect fails the
+/// request with its 3xx status.
+fn redirect_policy() -> Policy {
+    Policy::custom(|attempt| {
+        let allowed = attempt
+            .previous()
+            .first()
+            .is_some_and(|first| may_follow(first, attempt.url()));
+        if attempt.previous().len() > MAX_REDIRECTS {
+            attempt.error("too many redirects")
+        } else if allowed {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
+fn may_follow(first: &Url, next: &Url) -> bool {
+    next.host_str() == first.host_str()
+        && (next.origin() == first.origin() || next.scheme() == "https")
 }
 
 fn auth(provider: Provider, credentials: Option<&Credentials>) -> Auth {
