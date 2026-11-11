@@ -56,12 +56,12 @@ impl UrlError {
 /// `https://gist.github.com/<id>.git` and archived as `<user>/<id>`.
 pub const GIST_HOST: &str = "gist.github.com";
 
-/// The host whose settings and token a repository on `host` uses: gists
-/// use the ones of github.com.
 /// The path segment before the repository name in Azure DevOps URLs:
 /// `https://dev.azure.com/<org>/<project>/_git/<name>`.
 const AZURE_GIT_SEGMENT: &str = "_git";
 
+/// The host whose settings and token a repository on `host` uses: gists
+/// use the ones of github.com.
 pub fn settings_host(host: &str) -> &str {
     if host == GIST_HOST {
         "github.com"
