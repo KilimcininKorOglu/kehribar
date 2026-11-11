@@ -13,6 +13,7 @@ use axum::http::{Request, Response, StatusCode, header};
 use git_archive::config::Config;
 use git_archive::db;
 use git_archive::i18n::Catalog;
+use git_archive::sync::assets::AddressGuard;
 use git_archive::web::{self, AppState};
 use tempfile::TempDir;
 use tower::ServiceExt;
@@ -109,10 +110,20 @@ impl TestApp {
 
     /// An application whose stored secrets use `secret_key` (64 hex digits).
     pub async fn with_secret_key(secret_key: &str) -> Self {
+        Self::build(secret_key, AddressGuard::public_only()).await
+    }
+
+    /// An application whose image downloads may reach `guard`'s addresses,
+    /// such as a local image server.
+    pub async fn with_guard(guard: AddressGuard) -> Self {
+        Self::build(&test_secret_key(), guard).await
+    }
+
+    async fn build(secret_key: &str, guard: AddressGuard) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = db::open_in_memory().await.unwrap();
         let config = config_with_key(dir.path(), secret_key);
-        let state = AppState::new(pool, config, Catalog::load().unwrap());
+        let state = AppState::with_guard(pool, config, Catalog::load().unwrap(), guard);
         let app = web::router(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))));
         let mut test = Self {

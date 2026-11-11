@@ -10,6 +10,7 @@ use serde::Deserialize;
 use url::form_urlencoded;
 
 use super::form::is_checked;
+use super::markdown;
 use super::pages::{Layout, Nav, render};
 use super::repos::PageContext;
 use crate::db::repos::{self, Repo};
@@ -61,13 +62,17 @@ struct SearchPage {
 }
 
 impl SearchPage {
-    /// The file page at the line of a match, in the searched revision.
+    /// The file page at the line of a match, in the searched revision. A
+    /// Markdown file opens as source, where the lines are numbered.
     fn line_url(&self, path: &str, line: &u64) -> String {
         let mut pairs = form_urlencoded::Serializer::new(String::new());
         if !self.rev.is_empty() {
             pairs.append_pair("ref", &self.rev);
         }
         pairs.append_pair("path", path);
+        if markdown::is_markdown(path) {
+            pairs.append_pair("view", "source");
+        }
         format!("/repos/{}/blob?{}#L{line}", self.repo.id, pairs.finish())
     }
 

@@ -7,6 +7,7 @@
 mod common;
 
 use std::collections::{BTreeMap, HashMap};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +20,7 @@ use git_archive::db::repos::{self, NewRepo};
 use git_archive::db::{self, unix_now};
 use git_archive::i18n::Catalog;
 use git_archive::sync::SyncContext;
+use git_archive::sync::assets::AddressGuard;
 use git_archive::sync::scheduler::Scheduler;
 use sha2::Digest;
 use wiremock::matchers::{method, path, path_regex};
@@ -166,6 +168,8 @@ fn context(config: Config, pool: sqlx::SqlitePool) -> SyncContext {
         config: Arc::new(config),
         catalog: Arc::new(Catalog::load().unwrap()),
         locks: Default::default(),
+        // The image server of a test is local.
+        guard: AddressGuard::allowing(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
     }
 }
 
@@ -319,6 +323,52 @@ async fn lfs_objects_are_uploaded_once_beside_the_bundles() {
         .unwrap()
         .iter()
         .filter(|r| r.method.as_str() == "PUT" && r.url.path().contains("/lfs/"))
+        .count();
+    assert_eq!(puts, 1);
+}
+
+#[tokio::test]
+async fn archived_images_are_uploaded_once_by_their_content() {
+    let (server, s3) = FakeS3::start().await;
+    let images = MockServer::start().await;
+    let png = b"\x89PNG\r\n\x1a\nimage".to_vec();
+    Mock::given(method("GET"))
+        .and(path("/logo.png"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/png")
+                .set_body_bytes(png.clone()),
+        )
+        .mount(&images)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = backup_config(&dir.path().join("data"), &server.uri());
+    let ctx = context(config, db::open_in_memory().await.unwrap());
+    let source = common::source_repo(dir.path(), "project");
+    let readme = format!("![logo]({}/logo.png)\n", images.uri());
+    commit_file(&source, "README.md", readme.as_bytes());
+    let id = archived_repo(&ctx, &source).await;
+
+    let run = backup::run(&ctx, PART_SIZE).await.unwrap().unwrap();
+    assert_eq!((run.uploaded, run.error.as_deref()), (1, None));
+    let hash: String = sha2::Sha256::digest(&png)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let keys = s3.keys(&format!("{FOLDER}assets/"));
+    assert_eq!(keys, [format!("{FOLDER}assets/{hash}")]);
+    assert_eq!(s3.object(&keys[0]), png);
+
+    // A new commit uploads a new bundle, but not the stored image again.
+    commit_file(&source, "second.txt", b"second\n");
+    sync(&ctx, id).await;
+    backup::run(&ctx, PART_SIZE).await.unwrap().unwrap();
+    let puts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT" && r.url.path().contains("/assets/"))
         .count();
     assert_eq!(puts, 1);
 }

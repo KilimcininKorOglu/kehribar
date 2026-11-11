@@ -175,6 +175,7 @@ async fn setup() -> Setup {
         config: Arc::new(config),
         catalog: Arc::new(git_archive::i18n::Catalog::load().unwrap()),
         locks: Default::default(),
+        guard: Default::default(),
     };
     Setup {
         scheduler: Scheduler::new(ctx.clone()),

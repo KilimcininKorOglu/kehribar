@@ -39,6 +39,7 @@ use crate::config::Config;
 use crate::crypto::Cipher;
 use crate::i18n::Catalog;
 use crate::sync::SyncContext;
+use crate::sync::assets::AddressGuard;
 use crate::sync::locks::RepoLocks;
 use crate::sync::scheduler::Scheduler;
 
@@ -56,6 +57,17 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config, catalog: Catalog) -> Self {
+        Self::with_guard(pool, config, catalog, AddressGuard::public_only())
+    }
+
+    /// The state with the address check of image downloads given; tests
+    /// allow their local image server with it.
+    pub fn with_guard(
+        pool: SqlitePool,
+        config: Config,
+        catalog: Catalog,
+        guard: AddressGuard,
+    ) -> Self {
         let config = Arc::new(config);
         let cipher = Cipher::new(&config.secret_key);
         let catalog = Arc::new(catalog);
@@ -65,6 +77,7 @@ impl AppState {
             config: config.clone(),
             catalog: catalog.clone(),
             locks: RepoLocks::default(),
+            guard,
         });
         Self {
             pool,
@@ -117,6 +130,7 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/tree", get(browse::tree))
         .route("/repos/{id}/blob", get(browse::blob))
         .route("/repos/{id}/raw", get(browse::raw))
+        .route("/repos/{id}/asset/{sha256}", get(browse::asset))
         .route("/repos/{id}/blame", get(browse::blame))
         .route("/repos/{id}/commits", get(browse::commits))
         .route("/repos/{id}/commit/{sha}", get(browse::commit))

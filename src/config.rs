@@ -202,6 +202,12 @@ impl Config {
         self.data_dir.join("tmp")
     }
 
+    /// Archived copies of the external images of Markdown files, named by
+    /// the SHA-256 of their content.
+    pub fn assets_dir(&self) -> PathBuf {
+        self.data_dir.join("assets")
+    }
+
     /// The SSH host keys stored on the first connection to each server.
     pub fn known_hosts(&self) -> PathBuf {
         self.data_dir.join("ssh").join("known_hosts")

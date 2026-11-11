@@ -4,7 +4,8 @@
 //! Keys: `<prefix>/<host>/<owner>/<name>/<unix time>.bundle`, and
 //! `<prefix>/<host>/<owner>/<name>.wiki/<unix time>.bundle` for the wiki.
 //! `git clone --mirror <file>.bundle` restores a repository. With LFS on,
-//! every LFS object goes to `<prefix>/<host>/<owner>/<name>/lfs/<oid>` once.
+//! every LFS object goes to `<prefix>/<host>/<owner>/<name>/lfs/<oid>` once,
+//! and every archived Markdown image to `.../<name>/assets/<sha256>` once.
 
 pub mod s3;
 pub mod settings;
@@ -16,7 +17,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use crate::db::repos::{self, Repo};
-use crate::db::{backups, unix_now};
+use crate::db::{assets, backups, unix_now};
 use crate::git::{Git, lfs, mirror};
 use crate::notify::{self, Change, Event};
 use crate::sync::SyncContext;
@@ -170,7 +171,28 @@ impl Job<'_> {
         } else {
             0
         };
-        Ok(bundled || objects > 0)
+        let images = self.back_up_assets(repo).await?;
+        Ok(bundled || objects > 0 || images > 0)
+    }
+
+    /// Uploads every archived image of the repository missing under
+    /// `<repo>/assets/<sha256>`. Like LFS objects, a stored image is named
+    /// by its content and never changes. Returns the number of uploads.
+    async fn back_up_assets(&self, repo: &Repo) -> Result<usize, String> {
+        let rows = assets::for_repo(&self.ctx.pool, repo.id)
+            .await
+            .map_err(|err| err.to_string())?;
+        let dir = self.ctx.config.assets_dir();
+        let hashes: HashSet<String> = rows.into_iter().map(|row| row.sha256).collect();
+        let files = hashes
+            .into_iter()
+            .map(|hash| {
+                let file = dir.join(&hash);
+                (hash, file)
+            })
+            .collect();
+        self.upload_missing(&format!("{}/assets/", repo.full_name()), files)
+            .await
     }
 
     /// Uploads every local LFS object missing under `<repo>/lfs/<oid>`. The
@@ -181,14 +203,25 @@ impl Job<'_> {
         let local = lfs::local_objects(&dir)
             .await
             .map_err(|err| format!("cannot list the LFS objects: {err}"))?;
-        if local.is_empty() {
+        self.upload_missing(&format!("{}/lfs/", repo.full_name()), local)
+            .await
+    }
+
+    /// Uploads each `(name, file)` the storage lacks under `folder`. The
+    /// names are content hashes, so a stored file never needs an update.
+    async fn upload_missing(
+        &self,
+        folder: &str,
+        files: Vec<(String, PathBuf)>,
+    ) -> Result<usize, String> {
+        if files.is_empty() {
             return Ok(0);
         }
-        let prefix = self.store.key(&format!("{}/lfs/", repo.full_name()));
+        let prefix = self.store.key(folder);
         let stored: HashSet<String> = self.store.list(&prefix).await?.into_iter().collect();
         let mut uploaded = 0;
-        for (oid, file) in local {
-            let key = format!("{prefix}{oid}");
+        for (name, file) in files {
+            let key = format!("{prefix}{name}");
             if !stored.contains(&key) {
                 self.store.put_file(&key, &file).await?;
                 uploaded += 1;

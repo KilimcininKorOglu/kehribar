@@ -20,6 +20,7 @@ Pull requests and issues are not archived. Git LFS objects are archived only for
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
 - Fetching over SSH with a generated or pasted key per host, and a stored host key that a fetch checks every time.
 - Git LFS per repository: the objects are archived, shown in the file view and in downloads, and backed up.
+- External images of Markdown files are archived and shown from the archive, with SSRF protection.
 - Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README, blame, raw files.
 - Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
 - Ref exclude patterns per host and per repository, for example `refs/pull/*`.
@@ -192,6 +193,19 @@ git clone --mirror name-1794336958.bundle name.git
 mkdir -p name.git/lfs/objects/${oid:0:2}/${oid:2:2}
 cp <oid> name.git/lfs/objects/${oid:0:2}/${oid:2:2}/<oid>
 ```
+
+## Markdown images
+
+After every successful sync, git-archive reads the Markdown files (`.md`, `.markdown`) of the default branch and downloads the external images they show: Markdown images and HTML `<img>` elements with an `http` or `https` URL. A rendered README and the rendered view of a Markdown file then show the archived copy from `/repos/<id>/asset/<sha256>` instead of the external address; the "Source" switch of a Markdown file shows its text.
+
+- At most 200 images per repository, in the order the files name them. The repository page says when the files name more.
+- At most 5 MB per image, and only answers with an `image/*` content type. A request may take 20 seconds and follow 3 redirects.
+- An archived image is downloaded again after 24 hours. A failed download keeps the copy the archive has and does not fail the sync; it is written to the log.
+- Images go only to public addresses. A host name is resolved first, and the request is refused when any of its addresses is loopback, private, link-local, shared (100.64.0.0/10), multicast, documentation or another reserved range; the connection then goes to the checked address. Every redirect is checked the same way, so a redirect to an internal address is refused too. Proxy settings of the environment are not used for these requests.
+- The files are stored in `/data/assets/<sha256>`, once for every repository that shows the same image. The copies are served in a sandbox (`Content-Security-Policy: sandbox; default-src 'none'`), so an SVG image cannot run a script.
+- Deleting a repository deletes its image records and every stored file that no repository uses any more. A file younger than an hour is kept until a later sync or deletion, because a sync running at the same time may still record it.
+
+The backup uploads every archived image once to `<prefix>/<host>/<owner>/<name>/assets/<sha256>`. The database (`/data/git-archive.db`) holds which image URL belongs to which file, so restore the images together with it: copy the downloaded objects to `/data/assets/` with the same names. Without the database, a sync downloads the images again from their sources, and an image whose source is gone stays external.
 
 ## Export and import
 

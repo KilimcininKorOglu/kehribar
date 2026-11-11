@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::{SyncContext, credentials, ref_log};
+use super::{SyncContext, assets, credentials, ref_log};
 use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
 use crate::db::sync_runs::{self, RunOutcome, RunResult};
@@ -84,6 +84,9 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         Ok(done) => done,
         Err(message) => return defer(ctx, repo, run_id, &message).await,
     };
+    if status == RepoStatus::Ok {
+        assets::refresh(ctx, &git, repo, &dir, started).await?;
+    }
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
     let size_bytes = archive_size(&dir).await;

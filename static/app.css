@@ -858,6 +858,40 @@ pre.diff {
   max-width: 100%;
 }
 
+.file-markdown {
+  padding: 1rem 1.25rem;
+}
+
+/* Rendered or source view of a Markdown file */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segmented a {
+  padding: 0.2rem 0.65rem;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.segmented a + a {
+  border-left: 1px solid var(--border);
+}
+
+.segmented a:hover {
+  text-decoration: none;
+  background: var(--surface-2);
+}
+
+.segmented a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
 .markdown pre {
   overflow-x: auto;
 }

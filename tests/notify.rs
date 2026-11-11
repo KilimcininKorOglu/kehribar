@@ -28,6 +28,7 @@ fn context(config: Config, pool: sqlx::SqlitePool) -> SyncContext {
         config: Arc::new(config),
         catalog: Arc::new(Catalog::load().unwrap()),
         locks: Default::default(),
+        guard: Default::default(),
     }
 }
 

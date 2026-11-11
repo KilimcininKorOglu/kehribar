@@ -12,6 +12,7 @@ use super::auth::CurrentSession;
 use super::form::{encrypt_token, is_checked, optional_number, optional_text};
 use super::pages::{Layout, Nav, render};
 use super::prefs::Prefs;
+use crate::db::assets::{self, Check};
 use crate::db::hosts::{self, Host};
 use crate::db::ref_events::{self, RefEvent};
 use crate::db::repos::{self, ListFilter, NewRepo, Repo, RepoSettings, RepoSort, RepoStatus};
@@ -20,6 +21,7 @@ use crate::db::unix_now;
 use crate::error::AppError;
 use crate::git::mirror;
 use crate::settings::INTERVAL_RANGE;
+use crate::sync::assets::{self as sync_assets, MAX_IMAGES};
 use crate::sync::credentials::{self, CredentialSource};
 use crate::{ref_filter, repo_url};
 
@@ -550,9 +552,32 @@ struct DetailPage {
     clone_url: String,
     /// Text of the ref pattern field, one pattern per line.
     ref_exclude: String,
+    /// Archived images of the Markdown files.
+    image_count: usize,
+    image_check: Option<Check>,
 }
 
 impl DetailPage {
+    /// "12 archived" for the images of the Markdown files.
+    fn images_text(&self) -> String {
+        self.layout.tf_number(
+            "repo.images_archived",
+            &i64::try_from(self.image_count).unwrap_or(i64::MAX),
+        )
+    }
+
+    /// The warning of a check that found more images than the limit.
+    fn images_skipped(&self) -> Option<String> {
+        let check = self.image_check.filter(|check| check.skipped > 0)?;
+        Some(self.layout.tf(
+            "repo.images_skipped",
+            &[
+                ("found", &check.found.to_string()),
+                ("max", &MAX_IMAGES.to_string()),
+            ],
+        ))
+    }
+
     /// "<size> freed" for the last repack, when it freed space.
     fn repack_saved(&self) -> Option<String> {
         let saved = self.repo.repack_saved_bytes.filter(|bytes| *bytes > 0)?;
@@ -622,6 +647,8 @@ async fn detail_page(
     let host = hosts::find_by_host(&ctx.state.pool, repo_url::settings_host(&repo.host)).await?;
     let credential_source = credentials::source(&repo, host.as_ref());
     let clone_url = clone_url(ctx, &repo);
+    let image_count = assets::for_repo(&ctx.state.pool, repo.id).await?.len();
+    let image_check = assets::last_check(&ctx.state.pool, repo.id).await?;
     let layout = ctx.layout(Nav::Repos);
     let notice = notice_key.map(|key| layout.t(key).to_owned());
     let global_interval = layout.tf_number("repo.interval_global", &global.interval_minutes);
@@ -644,6 +671,8 @@ async fn detail_page(
         credential_source,
         tab: "overview",
         clone_url,
+        image_count,
+        image_check,
     })
 }
 
@@ -784,17 +813,20 @@ pub async fn delete(
         let page = detail_page(&ctx, repo, None, Some(message)).await?;
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
     }
-    let dir = repo_url::archive_dir(
-        &ctx.state.config.data_dir,
-        &repo.host,
-        &repo.owner,
-        &repo.name,
-    );
-    repos::delete(&ctx.state.pool, id).await?;
-    remove_dir(&mirror::wiki_dir(&dir)).await?;
-    remove_dir(&dir).await?;
+    remove_repo(&ctx.state, &repo).await?;
     tracing::info!(url = %repo.url, "repository deleted with its archive");
     Ok(Redirect::to("/").into_response())
+}
+
+/// Deletes the record of a repository, its archive with the wiki, and the
+/// stored images that no repository uses any more.
+async fn remove_repo(state: &AppState, repo: &Repo) -> Result<(), AppError> {
+    let dir = repo_url::archive_dir(&state.config.data_dir, &repo.host, &repo.owner, &repo.name);
+    repos::delete(&state.pool, repo.id).await?;
+    remove_dir(&mirror::wiki_dir(&dir)).await?;
+    remove_dir(&dir).await?;
+    sync_assets::remove_unused(&state.pool, &state.config).await?;
+    Ok(())
 }
 
 async fn remove_dir(path: &std::path::Path) -> Result<(), AppError> {

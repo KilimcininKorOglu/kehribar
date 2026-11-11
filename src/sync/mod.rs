@@ -1,5 +1,6 @@
 //! Background synchronisation of the archived repositories.
 
+pub mod assets;
 pub mod credentials;
 pub mod locks;
 pub mod ref_log;
@@ -27,6 +28,8 @@ pub struct SyncContext {
     /// Translations for the notifications.
     pub catalog: Arc<Catalog>,
     pub locks: locks::RepoLocks,
+    /// The addresses an image download may connect to.
+    pub guard: assets::AddressGuard,
 }
 
 impl SyncContext {

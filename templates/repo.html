@@ -28,10 +28,12 @@
     <div><dt>{{ layout.t("repo.next_sync") }}</dt><dd><time title="{{ layout.absolute(repo.next_sync_at) }}">{{ layout.ago(repo.next_sync_at) }}</time></dd></div>
     <div><dt>{{ layout.t("repo.size") }}</dt><dd>{{ layout.bytes(repo.size_bytes) }}{% if repo.lfs_size_bytes > 0 %} <span class="muted small">({{ layout.t("repo.lfs_part") }} {{ layout.bytes(repo.lfs_size_bytes) }})</span>{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.default_branch") }}</dt><dd class="mono">{% if let Some(branch) = repo.default_branch %}{{ branch }}{% else %}–{% endif %}</dd></div>
+    <div><dt>{{ layout.t("repo.images") }}</dt><dd>{{ images_text() }}</dd></div>
     <div><dt>{{ layout.t("repo.wiki") }}</dt><dd>{% if repo.has_wiki %}{{ layout.t("repo.wiki_yes") }}{% else %}{{ layout.t("repo.wiki_no") }}{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.last_fsck") }}</dt><dd>{% if let Some(ts) = repo.last_fsck_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% if repo.fsck_error.is_some() %} <span class="badge badge-error">{{ layout.t("repo.fsck_failed") }}</span>{% endif %}{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.last_repack") }}</dt><dd>{% if let Some(ts) = repo.last_repack_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% if let Some(saved) = repack_saved() %} <span class="muted small">({{ saved }})</span>{% endif %}{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
   </dl>
+  {% if let Some(skipped) = images_skipped() %}<p class="alert alert-warn" role="status">{{ skipped }}</p>{% endif %}
   {% if let Some(message) = repo.last_error %}
   <div class="alert alert-error"><strong>{{ layout.t("repo.last_error") }}:</strong> <span class="mono">{{ message }}</span></div>
   {% endif %}

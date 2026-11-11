@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use askama::Template;
@@ -19,11 +20,11 @@ use tokio_util::io::ReaderStream;
 use url::form_urlencoded;
 
 use super::highlight;
-use super::markdown::{self, LinkTarget};
+use super::markdown::{self, AssetUrls, LinkTarget};
 use super::pages::{Layout, Nav, render};
 use super::repos::PageContext;
-use crate::db::ref_events;
 use crate::db::repos::{self, Repo};
+use crate::db::{assets, ref_events};
 use crate::error::AppError;
 use crate::git::read::{
     self, Blame, BlameChunk, CommitDetail, CommitSummary, EntryKind, FileChange, FileDiff,
@@ -31,6 +32,7 @@ use crate::git::read::{
 };
 use crate::git::{Git, lfs};
 use crate::repo_url;
+use crate::sync::assets as sync_assets;
 
 /// Commits on one page of the history.
 const PAGE_SIZE: usize = 50;
@@ -68,6 +70,8 @@ pub struct BrowseQuery {
     q: Option<String>,
     page: Option<usize>,
     format: Option<String>,
+    /// `source` shows a Markdown file as text instead of rendered.
+    view: Option<String>,
 }
 
 /// The revision a page shows and the links it builds.
@@ -81,6 +85,8 @@ pub struct RepoView {
     pub is_default: bool,
     dir: PathBuf,
     git: Git,
+    /// Archived copies of external images, for a rendered README.
+    assets: Option<AssetUrls>,
 }
 
 impl RepoView {
@@ -191,6 +197,57 @@ impl LinkTarget for RepoView {
             self.blob_url(path)
         }
     }
+
+    fn assets(&self) -> Option<AssetUrls> {
+        self.assets.clone()
+    }
+}
+
+/// The archived images of a repository: image URL to local URL.
+async fn asset_urls(ctx: &PageContext, id: i64) -> Result<AssetUrls, AppError> {
+    let rows = assets::for_repo(&ctx.state.pool, id).await?;
+    Ok(Arc::new(
+        rows.into_iter()
+            .map(|asset| (asset.url, format!("/repos/{id}/asset/{}", asset.sha256)))
+            .collect(),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssetPath {
+    id: i64,
+    sha256: String,
+}
+
+/// An archived image. The page that shows it trusts it no more than a raw
+/// file: it runs in a sandbox, so an SVG cannot run a script.
+pub async fn asset(ctx: PageContext, Path(path): Path<AssetPath>) -> Result<Response, AppError> {
+    if !sync_assets::is_hash(&path.sha256) {
+        return Err(AppError::NotFound);
+    }
+    let content_type = assets::content_type(&ctx.state.pool, path.id, &path.sha256)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let file = ctx.state.config.assets_dir().join(&path.sha256);
+    let opened = tokio::fs::File::open(&file)
+        .await
+        .map_err(AppError::internal)?;
+    let mut response = Body::from_stream(ReaderStream::new(opened)).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&content_type).map_err(AppError::internal)?,
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("sandbox; default-src 'none'"),
+    );
+    // The name is the content's hash, so the content never changes.
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=31536000, immutable"),
+    );
+    Ok(response)
 }
 
 async fn load_repo(ctx: &PageContext, id: i64) -> Result<Repo, AppError> {
@@ -236,6 +293,7 @@ async fn load_view(
         is_default: given.is_none(),
         dir,
         git,
+        assets: None,
     })
 }
 
@@ -283,17 +341,13 @@ pub async fn tree(
     Query(query): Query<BrowseQuery>,
 ) -> Result<Response, AppError> {
     let repo = load_repo(&ctx, id).await?;
-    let view = load_view(&ctx, &repo, query.rev.as_deref()).await?;
+    let mut view = load_view(&ctx, &repo, query.rev.as_deref()).await?;
+    view.assets = Some(asset_urls(&ctx, id).await?);
     let path = clean_path(&query)?;
     let (entries, readme) = match view.commit.as_deref() {
-        Some(commit) => match read::object_kind(&view.git, &view.dir, commit, &path).await? {
-            Some(EntryKind::Tree) => {
-                let entries = read::tree(&view.git, &view.dir, commit, &path).await?;
-                let readme = load_readme(&view, commit, &path, &entries).await?;
-                (entries, readme)
-            }
-            Some(EntryKind::Blob) => return Ok(Redirect::to(&view.blob_url(&path)).into_response()),
-            _ => return Err(AppError::NotFound),
+        Some(commit) => match directory(&view, commit, &path).await? {
+            Some(found) => found,
+            None => return Ok(Redirect::to(&view.blob_url(&path)).into_response()),
         },
         None => (Vec::new(), None),
     };
@@ -307,6 +361,24 @@ pub async fn tree(
         readme,
     };
     Ok(render(&page)?.into_response())
+}
+
+/// The entries and the README of the directory `path`; `None` when `path`
+/// is a file, which the caller redirects to its file page.
+async fn directory(
+    view: &RepoView,
+    commit: &str,
+    path: &str,
+) -> Result<Option<(Vec<TreeEntry>, Option<Readme>)>, AppError> {
+    match read::object_kind(&view.git, &view.dir, commit, path).await? {
+        Some(EntryKind::Tree) => {
+            let entries = read::tree(&view.git, &view.dir, commit, path).await?;
+            let readme = load_readme(view, commit, path, &entries).await?;
+            Ok(Some((entries, readme)))
+        }
+        Some(EntryKind::Blob) => Ok(None),
+        _ => Err(AppError::NotFound),
+    }
 }
 
 async fn load_readme(
@@ -361,9 +433,17 @@ struct BlobPage {
     line_count: usize,
     is_image: bool,
     too_large: bool,
+    /// The rendered HTML of a Markdown file, unless its source is asked for.
+    rendered: Option<String>,
+    is_markdown: bool,
 }
 
 impl BlobPage {
+    /// The file page that shows the source of a Markdown file.
+    fn source_url(&self) -> String {
+        format!("{}&view=source", self.view.blob_url(&self.path))
+    }
+
     fn line_numbers(&self) -> std::ops::RangeInclusive<usize> {
         1..=self.line_count
     }
@@ -413,9 +493,22 @@ pub async fn blob(
         Ok(found) => found,
         Err(redirect) => return Ok(redirect),
     };
+    let mut view = view;
     let blob = file_blob(&repo, &view, &path).await?;
     let is_image = image_type(&path).is_some();
-    let (code, line_count) = highlighted(&blob, &path).await?;
+    let is_markdown = markdown::is_markdown(&path);
+    let show_source = query.view.as_deref() == Some("source");
+    let rendered = if is_markdown && !show_source {
+        view.assets = Some(asset_urls(&ctx, id).await?);
+        rendered_markdown(&blob, &path, &view)
+    } else {
+        None
+    };
+    let (code, line_count) = if rendered.is_some() {
+        (None, 0)
+    } else {
+        highlighted(&blob, &path).await?
+    };
     let page = BlobPage {
         layout: ctx.layout(Nav::Repos),
         repo,
@@ -427,8 +520,21 @@ pub async fn blob(
         line_count,
         is_image,
         too_large: blob.too_large,
+        rendered,
+        is_markdown,
     };
     Ok(render(&page)?.into_response())
+}
+
+/// The rendered HTML of a Markdown file; nothing for a binary file or one
+/// too large to show.
+fn rendered_markdown(blob: &read::Blob, path: &str, view: &RepoView) -> Option<String> {
+    if blob.too_large || blob.is_binary() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&blob.data);
+    let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    Some(markdown::render(&text, dir, view))
 }
 
 /// The file at `path` for the file view; an LFS file gives its object.
@@ -899,6 +1005,7 @@ mod tests {
             is_default: rev.is_none(),
             dir: PathBuf::new(),
             git: Git::new(READ_TIMEOUT),
+            assets: None,
         }
     }
 

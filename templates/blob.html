@@ -9,11 +9,19 @@
   <div class="file-head">
     <span class="muted small">{{ size_text() }}{% if code.is_some() %} · {{ lines_text() }}{% endif %}</span>
     <div class="actions">
+      {% if is_markdown && !too_large %}
+      <nav class="segmented" aria-label="{{ layout.t("browse.markdown_view") }}">
+        <a href="{{ view.blob_url(path) }}"{% if rendered.is_some() %} aria-current="page"{% endif %}>{{ layout.t("browse.rendered") }}</a>
+        <a href="{{ source_url() }}"{% if rendered.is_none() %} aria-current="page"{% endif %}>{{ layout.t("browse.source") }}</a>
+      </nav>
+      {% endif %}
       <a class="btn btn-sm" href="{{ view.raw_url(path) }}">{{ layout.t("browse.raw") }}</a>
-      {% if code.is_some() %}<a class="btn btn-sm" href="{{ view.blame_url(path) }}">{{ layout.t("browse.blame") }}</a>{% endif %}
+      {% if code.is_some() || rendered.is_some() %}<a class="btn btn-sm" href="{{ view.blame_url(path) }}">{{ layout.t("browse.blame") }}</a>{% endif %}
     </div>
   </div>
-  {% if let Some(code) = code %}
+  {% if let Some(html) = rendered %}
+  <div class="markdown file-markdown">{{ html|safe }}</div>
+  {% else if let Some(code) = code %}
   <div class="code-view">
     <pre class="gutter" aria-hidden="true">{% for n in line_numbers() %}<a id="L{{ n }}" href="#L{{ n }}">{{ n }}</a>
 {% endfor %}</pre>
