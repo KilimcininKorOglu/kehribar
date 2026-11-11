@@ -158,7 +158,6 @@ Tokens with read access are enough:
 - GitLab: a personal, group or project access token with `read_api` and `read_repository`.
 - Forgejo / Gitea: an access token with read permission for repositories, and for organizations and users when you import them.
 - Bitbucket Cloud: an API token with scopes (app passwords no longer work), created for the Bitbucket app with the `read:repository:bitbucket` scope. Put the email address of the Atlassian account in the username field. The REST API authenticates with that email; for Git, git-archive sends the fixed username `x-bitbucket-api-token-auth` that Bitbucket requires with API tokens.
-
 - Gitee: a personal access token with read access to repositories. The API receives it in the `access_token` query parameter.
 - Azure DevOps: a personal access token with the "Code (Read)" scope (`vso.code`). Azure DevOps ignores the username.
 - SourceHut: a personal access token for git.sr.ht with read access to profile and repositories. The SourceHut API does not answer without a token.
