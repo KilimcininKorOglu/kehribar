@@ -129,6 +129,13 @@ matches = "{n} eşleşen satır"
 files = "{n} dosya"
 cut = "Yalnız ilk {n} eşleşen satır gösteriliyor. Kalanını görmek için aramayı daraltın."
 
+[wiki]
+title = "Wiki"
+pages = "Sayfalar"
+empty = "Arşivdeki wiki'de henüz sayfa yok."
+no_home = "Wiki'nin Home sayfası yok. Listeden bir sayfa seçin."
+render_failed = "Bu sayfa biçimlendirilemediği için düz metin olarak gösteriliyor."
+
 [event]
 baseline = "Kayıt başlangıcı"
 created = "Oluşturuldu"

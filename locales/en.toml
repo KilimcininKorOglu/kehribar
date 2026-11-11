@@ -133,6 +133,13 @@ files = "{n} files"
 files_one = "{n} file"
 cut = "Only the first {n} matching lines are shown. Make the search more specific to see the rest."
 
+[wiki]
+title = "Wiki"
+pages = "Pages"
+empty = "The archived wiki has no pages yet."
+no_home = "The wiki has no Home page. Pick a page from the list."
+render_failed = "This page could not be rendered, so it is shown as text."
+
 [event]
 baseline = "Recording started"
 created = "Created"

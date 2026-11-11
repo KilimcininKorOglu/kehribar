@@ -1189,6 +1189,61 @@ pre.diff {
   text-align: right;
 }
 
+/* Wiki */
+
+.wiki-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: 1rem;
+  align-items: start;
+}
+
+.wiki-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.wiki-head h2 {
+  margin: 0;
+}
+
+.wiki-text {
+  margin: 0;
+  overflow-x: auto;
+  font: 0.85rem/1.5 var(--mono);
+  white-space: pre-wrap;
+}
+
+.wiki-pages h2 {
+  margin: 0 0 0.5rem;
+}
+
+.wiki-pages ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wiki-pages li a {
+  display: block;
+  padding: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+
+.wiki-pages a[aria-current="page"] {
+  font-weight: 600;
+  color: var(--text);
+}
+
+@media (max-width: 800px) {
+  .wiki-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Ref history */
 
 .date-form {

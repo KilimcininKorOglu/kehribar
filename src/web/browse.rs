@@ -546,8 +546,14 @@ pub async fn raw(
         Err(redirect) => return Ok(redirect),
     };
     let (body, head) = raw_body(&repo, &view, &path).await?;
-    let name = path.rsplit('/').next().unwrap_or(&path);
-    let content_type = image_type(&path).unwrap_or(if head.is_binary() {
+    Ok(raw_response(body, &head, &path))
+}
+
+/// A raw file response: images keep their type, any other file is plain
+/// text or a download, always under the sandbox policy.
+pub(super) fn raw_response(body: Body, head: &read::Blob, path: &str) -> Response {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let content_type = image_type(path).unwrap_or(if head.is_binary() {
         "application/octet-stream"
     } else {
         "text/plain; charset=utf-8"
@@ -568,7 +574,7 @@ pub async fn raw(
             headers.insert(header::CONTENT_DISPOSITION, value);
         }
     }
-    Ok(response)
+    response
 }
 
 /// The formats `git archive` writes: query value, git format, MIME type.
@@ -628,8 +634,9 @@ fn archive_label(name: &str, rev: &str) -> String {
         .collect()
 }
 
-/// RFC 5987 encoding of a file name for `Content-Disposition`.
-fn encode_filename(name: &str) -> String {
+/// Percent-encoding of a name, for a URL path segment and for the RFC 5987
+/// file name of `Content-Disposition`.
+pub(super) fn encode_filename(name: &str) -> String {
     form_urlencoded::byte_serialize(name.as_bytes())
         .collect::<String>()
         .replace('+', "%20")

@@ -6,4 +6,5 @@
   <a href="/repos/{{ repo.id }}/history" aria-current="{% if tab == "history" %}page{% else %}false{% endif %}">{{ layout.t("history.title") }}</a>
   <a href="/repos/{{ repo.id }}/compare" aria-current="{% if tab == "compare" %}page{% else %}false{% endif %}">{{ layout.t("compare.title") }}</a>
   <a href="/repos/{{ repo.id }}/search" aria-current="{% if tab == "search" %}page{% else %}false{% endif %}">{{ layout.t("search.title") }}</a>
+  {% if repo.has_wiki %}<a href="/repos/{{ repo.id }}/wiki" aria-current="{% if tab == "wiki" %}page{% else %}false{% endif %}">{{ layout.t("wiki.title") }}</a>{% endif %}
 </nav>

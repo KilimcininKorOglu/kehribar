@@ -22,6 +22,7 @@ pub mod settings_notify;
 pub mod settings_page;
 pub mod settings_transfer;
 pub mod sources;
+pub mod wiki;
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -123,6 +124,9 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/history", get(history::show))
         .route("/repos/{id}/compare", get(compare::show))
         .route("/repos/{id}/search", get(search::show))
+        .route("/repos/{id}/wiki", get(wiki::index))
+        .route("/repos/{id}/wiki/{page}", get(wiki::page))
+        .route("/repos/{id}/wiki-file", get(wiki::file))
         .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))

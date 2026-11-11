@@ -564,6 +564,21 @@ pub async fn tree(
     Ok(entries)
 }
 
+/// Every file of a commit, in all directories, sorted by path. `name` and
+/// `path` both hold the path from the root.
+pub async fn files(git: &Git, dir: &Path, commit: &str) -> Result<Vec<TreeEntry>, GitError> {
+    let spec = object_spec(commit, "");
+    let out = git
+        .run(Some(dir), ["ls-tree", "-r", "-z", "--long", &spec], None)
+        .await?;
+    let text = String::from_utf8_lossy(&out);
+    Ok(text
+        .split('\0')
+        .filter_map(|record| parse_tree_entry(record, ""))
+        .filter(|entry| entry.kind == EntryKind::Blob)
+        .collect())
+}
+
 /// `<mode> <type> <object> <size>\t<name>`.
 fn parse_tree_entry(record: &str, parent: &str) -> Option<TreeEntry> {
     let (meta, name) = record.split_once('\t')?;

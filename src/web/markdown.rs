@@ -70,6 +70,12 @@ pub fn render(text: &str, base_dir: &str, target: &dyn LinkTarget) -> String {
         | Options::ENABLE_FOOTNOTES;
     let mut unsafe_html = String::new();
     html::push_html(&mut unsafe_html, Parser::new_ext(text, options));
+    clean(&unsafe_html, base_dir, target)
+}
+
+/// Sanitises HTML that an archived document produced: scripts, event
+/// handlers and unsafe URLs go, relative links point into the archive.
+pub fn clean(unsafe_html: &str, base_dir: &str, target: &dyn LinkTarget) -> String {
     let rewriter = Rewriter {
         base_dir: base_dir.to_owned(),
         target,
@@ -77,7 +83,7 @@ pub fn render(text: &str, base_dir: &str, target: &dyn LinkTarget) -> String {
     Builder::default()
         .url_relative(UrlRelative::Custom(Box::new(rewriter)))
         .link_rel(Some("noopener noreferrer nofollow"))
-        .clean(&unsafe_html)
+        .clean(unsafe_html)
         .to_string()
 }
 

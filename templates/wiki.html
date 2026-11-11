@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{% if let Some(shown) = shown %}{{ shown.title }} · {% endif %}{{ layout.t("wiki.title") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
+<div class="page-head">
+  <h1 class="repo-title"><a class="plain" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a></h1>
+</div>
+{% include "repo_tabs.html" %}
+
+<div class="wiki-layout">
+  <div class="wiki-main">
+    {% if let Some(shown) = shown %}
+    <section class="card readme">
+      <div class="wiki-head">
+        <h2>{{ shown.title }}</h2>
+        <a class="btn btn-sm" href="{{ file_url() }}">{{ layout.t("browse.raw") }}</a>
+      </div>
+      {% if shown.too_large %}
+      <p class="muted">{{ layout.t("browse.too_large") }}</p>
+      {% else if let Some(html) = shown.html %}
+      <div class="markdown">{{ html|safe }}</div>
+      {% else %}
+      {% if shown.failed %}<p class="alert alert-warn" role="status">{{ layout.t("wiki.render_failed") }}</p>{% endif %}
+      <pre class="wiki-text">{{ shown.text }}</pre>
+      {% endif %}
+    </section>
+    {% else if pages.is_empty() %}
+    <section class="card"><p class="muted">{{ layout.t("wiki.empty") }}</p></section>
+    {% else %}
+    <section class="card"><p class="muted">{{ layout.t("wiki.no_home") }}</p></section>
+    {% endif %}
+  </div>
+  {% if !pages.is_empty() %}
+  <nav class="card wiki-pages" aria-label="{{ layout.t("wiki.pages") }}">
+    <h2 class="small">{{ layout.t("wiki.pages") }} <span class="muted">{{ pages.len() }}</span></h2>
+    <ul>
+      {% for page in pages %}
+      <li><a href="{{ page.url }}"{% if is_current(page) %} aria-current="page"{% endif %}>{{ page.title }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+{% endblock %}

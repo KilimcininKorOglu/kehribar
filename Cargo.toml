@@ -35,6 +35,11 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 multer = "3.1"
 reqwest = { version = "0.13", features = ["json"] }
 rusty-s3 = "0.11"
+asciidork-parser = "0.38"
+asciidork-dr-html-backend = "0.39"
+asciidork-core = "0.37"
+rst_parser = "0.4"
+rst_renderer = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
