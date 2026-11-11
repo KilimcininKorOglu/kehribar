@@ -24,6 +24,11 @@ const REPO_CONFIG: &[(&str, &str)] = &[
     ("gc.reflogExpire", "never"),
     ("gc.reflogExpireUnreachable", "never"),
     ("core.logAllRefUpdates", "always"),
+    // Git's own automatic gc and maintenance run in the background after a
+    // fetch, outside the repository lock and the timeout; the scheduled
+    // repack does this work under the lock instead.
+    ("gc.auto", "0"),
+    ("maintenance.auto", "false"),
 ];
 
 /// How a ref changed in one sync.

@@ -111,6 +111,19 @@ fn without_archive_refs(refs: BTreeMap<String, String>) -> BTreeMap<String, Stri
 }
 
 #[tokio::test]
+async fn git_never_runs_its_own_maintenance_in_the_archive() {
+    let mut source = Source::new();
+    source.commit("one");
+    source.sync(100).await;
+    // Background gc after a fetch would run outside the repository lock.
+    assert_eq!(git_in(&source.archive, &["config", "gc.auto"]), "0");
+    assert_eq!(
+        git_in(&source.archive, &["config", "maintenance.auto"]),
+        "false"
+    );
+}
+
+#[tokio::test]
 async fn first_sync_copies_every_branch_and_tag() {
     let mut source = Source::new();
     source.commit("one");
