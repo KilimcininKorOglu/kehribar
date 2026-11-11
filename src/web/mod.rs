@@ -12,6 +12,7 @@ pub mod pages;
 pub mod prefs;
 pub mod repos;
 pub mod security;
+pub mod settings_notify;
 pub mod settings_page;
 pub mod sources;
 
@@ -47,18 +48,30 @@ impl AppState {
     pub fn new(pool: SqlitePool, config: Config, catalog: Catalog) -> Self {
         let config = Arc::new(config);
         let cipher = Cipher::new(&config.secret_key);
+        let catalog = Arc::new(catalog);
         let scheduler = Scheduler::new(SyncContext {
             pool: pool.clone(),
             cipher: cipher.clone(),
             config: config.clone(),
+            catalog: catalog.clone(),
         });
         Self {
             pool,
             cipher,
             config,
-            catalog: Arc::new(catalog),
+            catalog,
             limiter: Arc::new(auth::LoginLimiter::default()),
             scheduler,
+        }
+    }
+
+    /// The context background work uses, for work a request starts itself.
+    pub fn sync_context(&self) -> SyncContext {
+        SyncContext {
+            pool: self.pool.clone(),
+            cipher: self.cipher.clone(),
+            config: self.config.clone(),
+            catalog: self.catalog.clone(),
         }
     }
 }
@@ -113,6 +126,8 @@ pub fn router(state: AppState) -> Router {
             "/settings",
             get(settings_page::show).post(settings_page::save),
         )
+        .route("/settings/notifications", post(settings_notify::save))
+        .route("/settings/notifications/test", post(settings_notify::test))
         .route("/logout", post(auth::logout))
         .layer(from_fn(security::verify_csrf))
         .layer(from_fn_with_state(state.clone(), auth::require_session));

@@ -11,6 +11,7 @@ use crate::db::unix_now;
 use crate::git::maintenance;
 use crate::git::mirror::{self, SyncReport};
 use crate::git::{Credentials, Git, GitError, GitErrorKind};
+use crate::notify::{self, Change, Event};
 use crate::ref_filter;
 use crate::settings::SyncSettings;
 
@@ -76,6 +77,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         has_wiki: mirrored.has_wiki || (status != RepoStatus::Ok && repo.has_wiki),
     };
     repos::finish(&ctx.pool, repo.id, &outcome).await?;
+    report_change(ctx, repo, status, message.as_deref()).await;
     let run = RunResult {
         finished_at: finished,
         outcome: status,
@@ -84,6 +86,23 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         message: message.as_deref(),
     };
     sync_runs::finish(&ctx.pool, run_id, &run).await
+}
+
+/// Notifies when the repository starts failing or recovers. `repo.status`
+/// is the state before this sync.
+async fn report_change(ctx: &SyncContext, repo: &Repo, status: RepoStatus, message: Option<&str>) {
+    let previous = repo.status;
+    let event = match notify::repo_change(previous, status) {
+        Some(Change::Failed) => Event::RepoFailed {
+            repo,
+            previous,
+            status,
+            message: message.unwrap_or_default(),
+        },
+        Some(Change::Recovered) => Event::RepoRecovered { repo, previous },
+        None => return,
+    };
+    notify::send(ctx, event).await;
 }
 
 /// Fetches the repository, then runs the maintenance that is due. A failed

@@ -101,6 +101,14 @@ pub fn parse_api_url(input: &str) -> Result<Option<String>, UrlError> {
     Ok(Some(url.as_str().trim_end_matches('/').to_owned()))
 }
 
+/// Accepts any http(s) URL, query included, as webhook receivers need one
+/// sometimes. Returns it without surrounding blanks and a trailing slash.
+pub fn parse_http_url(input: &str) -> Option<String> {
+    let input = input.trim();
+    let url = Url::parse(input).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| input.trim_end_matches('/').to_owned())
+}
+
 /// Validates a user, organization or workspace name for a provider API.
 /// `nested` allows a GitLab group path such as `group/sub`. Returns the
 /// name without surrounding blanks and slashes.

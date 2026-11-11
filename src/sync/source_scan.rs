@@ -8,6 +8,7 @@ use crate::db::hosts::{self, Host};
 use crate::db::repos::{self, NewRepo};
 use crate::db::sources::{self, Source};
 use crate::db::unix_now;
+use crate::notify::{self, Change, Event};
 use crate::providers::{self, RemoteRepo};
 use crate::repo_url;
 
@@ -34,7 +35,24 @@ pub async fn scan(ctx: &SyncContext, source: &Source) -> sqlx::Result<ScanReport
         Some(err) => tracing::warn!(source = %source.name, %err, "source scan failed"),
         None => tracing::info!(source = %source.name, added = report.added, "source scanned"),
     }
+    report_change(ctx, source, report.error.as_deref()).await;
     Ok(report)
+}
+
+/// Notifies when the scans of `source` start failing or work again.
+/// `source.last_error` is the result of the scan before this one.
+async fn report_change(ctx: &SyncContext, source: &Source, error: Option<&str>) {
+    let event = match notify::error_change(source.last_error.as_deref(), error) {
+        Some(Change::Failed) => Event::SourceFailed {
+            source: &source.name,
+            message: error.unwrap_or_default(),
+        },
+        Some(Change::Recovered) => Event::SourceRecovered {
+            source: &source.name,
+        },
+        None => return,
+    };
+    notify::send(ctx, event).await;
 }
 
 fn failed(error: String) -> ScanReport {

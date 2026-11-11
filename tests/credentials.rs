@@ -173,6 +173,7 @@ async fn setup() -> Setup {
         pool: db::open_in_memory().await.unwrap(),
         cipher: Cipher::new(&config.secret_key),
         config: Arc::new(config),
+        catalog: Arc::new(git_archive::i18n::Catalog::load().unwrap()),
     };
     Setup {
         scheduler: Scheduler::new(ctx.clone()),

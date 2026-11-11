@@ -12,6 +12,7 @@ use serde::Deserialize;
 use super::form::{InvalidNumber, optional_number};
 use super::pages::{Layout, Nav, render};
 use super::repos::{NoticeQuery, PageContext};
+use super::settings_notify::{self, NotifyView};
 use crate::error::AppError;
 use crate::settings::{
     self, CONCURRENCY_RANGE, GIT_TIMEOUT_RANGE, INTERVAL_RANGE, MAINTENANCE_RANGE, Overrides,
@@ -19,7 +20,7 @@ use crate::settings::{
 };
 
 /// Number of numeric fields on the form.
-const FIELD_COUNT: usize = 5;
+pub const FIELD_COUNT: usize = 5;
 
 /// One numeric setting as the form shows it.
 pub struct Field {
@@ -90,8 +91,72 @@ fn defaults(settings: SyncSettings) -> [i64; FIELD_COUNT] {
 struct SettingsPage {
     layout: Layout,
     fields: Vec<Field>,
+    notify: NotifyView,
     notice: Option<String>,
     errors: Vec<String>,
+}
+
+/// What differs between the renderings of the page. `None` parts show the
+/// saved values.
+pub struct PageState {
+    pub notice: Option<String>,
+    pub errors: Vec<String>,
+    /// Submitted sync field values, shown again with an error.
+    pub sync_values: Option<[Option<String>; FIELD_COUNT]>,
+    pub notify: Option<NotifyView>,
+    pub status: StatusCode,
+}
+
+impl Default for PageState {
+    fn default() -> Self {
+        Self {
+            notice: None,
+            errors: Vec::new(),
+            sync_values: None,
+            notify: None,
+            status: StatusCode::OK,
+        }
+    }
+}
+
+/// Renders the whole page; every form posts back to a handler that calls this.
+pub async fn respond(
+    ctx: &PageContext,
+    layout: Layout,
+    state: PageState,
+) -> Result<Response, AppError> {
+    let values = match state.sync_values {
+        Some(values) => values,
+        None => saved_values(ctx).await?,
+    };
+    let notify = match state.notify {
+        Some(view) => view,
+        None => settings_notify::load(ctx, &layout).await?,
+    };
+    let page = SettingsPage {
+        fields: fields(
+            &layout,
+            values,
+            SyncSettings::from_config(&ctx.state.config),
+        ),
+        notify,
+        layout,
+        notice: state.notice,
+        errors: state.errors,
+    };
+    Ok((state.status, render(&page)?).into_response())
+}
+
+async fn saved_values(ctx: &PageContext) -> Result<[Option<String>; FIELD_COUNT], AppError> {
+    let saved = settings::overrides(&ctx.state.pool).await?;
+    Ok([
+        saved.interval_minutes,
+        saved.concurrency,
+        saved.git_timeout_seconds,
+        saved.fsck_interval_days,
+        saved.repack_interval_days,
+    ]
+    .map(|v| v.map(|n| n.to_string())))
 }
 
 fn fields(layout: &Layout, values: [Option<String>; FIELD_COUNT], env: SyncSettings) -> Vec<Field> {
@@ -112,7 +177,7 @@ fn fields(layout: &Layout, values: [Option<String>; FIELD_COUNT], env: SyncSetti
         .collect()
 }
 
-fn layout(ctx: &PageContext) -> Layout {
+pub fn layout(ctx: &PageContext) -> Layout {
     Layout::private(
         &ctx.state,
         ctx.prefs,
@@ -122,33 +187,25 @@ fn layout(ctx: &PageContext) -> Layout {
     )
 }
 
+/// Maps the `notice` query value to a message key, ignoring anything else.
+fn notice_key(notice: Option<&str>) -> Option<&'static str> {
+    match notice? {
+        "saved" => Some("settings.saved"),
+        "notify_saved" => Some("settings.notify_saved"),
+        _ => None,
+    }
+}
+
 pub async fn show(
     ctx: PageContext,
     Query(query): Query<NoticeQuery>,
 ) -> Result<Response, AppError> {
-    let saved = settings::overrides(&ctx.state.pool).await?;
     let layout = layout(&ctx);
-    let values = [
-        saved.interval_minutes,
-        saved.concurrency,
-        saved.git_timeout_seconds,
-        saved.fsck_interval_days,
-        saved.repack_interval_days,
-    ]
-    .map(|v| v.map(|n| n.to_string()));
-    let notice =
-        (query.notice.as_deref() == Some("saved")).then(|| layout.t("settings.saved").to_owned());
-    let page = SettingsPage {
-        fields: fields(
-            &layout,
-            values,
-            SyncSettings::from_config(&ctx.state.config),
-        ),
-        layout,
-        notice,
-        errors: Vec::new(),
+    let state = PageState {
+        notice: notice_key(query.notice.as_deref()).map(|key| layout.t(key).to_owned()),
+        ..PageState::default()
     };
-    Ok(render(&page)?.into_response())
+    respond(&ctx, layout, state).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,17 +262,13 @@ pub async fn save(ctx: PageContext, Form(form): Form<SettingsForm>) -> Result<Re
     let parsed = match parse(&layout, &values) {
         Ok(parsed) => parsed,
         Err(errors) => {
-            let page = SettingsPage {
-                fields: fields(
-                    &layout,
-                    values,
-                    SyncSettings::from_config(&ctx.state.config),
-                ),
-                layout,
-                notice: None,
+            let state = PageState {
                 errors,
+                sync_values: Some(values),
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                ..PageState::default()
             };
-            return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
+            return respond(&ctx, layout, state).await;
         }
     };
     let [

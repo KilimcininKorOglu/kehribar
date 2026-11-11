@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 use crate::config::Config;
 use crate::crypto::Cipher;
 use crate::db::repos::Repo;
+use crate::i18n::Catalog;
 use crate::repo_url;
 
 /// What a sync needs from the application.
@@ -21,6 +22,8 @@ pub struct SyncContext {
     pub pool: SqlitePool,
     pub cipher: Cipher,
     pub config: Arc<Config>,
+    /// Translations for the notifications.
+    pub catalog: Arc<Catalog>,
 }
 
 impl SyncContext {

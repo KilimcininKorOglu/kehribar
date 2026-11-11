@@ -8,6 +8,8 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
+use crate::i18n::Lang;
+
 pub const ENV_ADMIN_USERNAME: &str = "GIT_ARCHIVE_ADMIN_USERNAME";
 pub const ENV_ADMIN_PASSWORD: &str = "GIT_ARCHIVE_ADMIN_PASSWORD";
 pub const ENV_SECRET_KEY: &str = "GIT_ARCHIVE_SECRET_KEY";
@@ -21,6 +23,15 @@ pub const ENV_REPACK_INTERVAL_DAYS: &str = "GIT_ARCHIVE_REPACK_INTERVAL_DAYS";
 pub const ENV_SESSION_TTL_HOURS: &str = "GIT_ARCHIVE_SESSION_TTL_HOURS";
 pub const ENV_COOKIE_SECURE: &str = "GIT_ARCHIVE_COOKIE_SECURE";
 pub const ENV_LOG_LEVEL: &str = "GIT_ARCHIVE_LOG_LEVEL";
+pub const ENV_PUBLIC_URL: &str = "GIT_ARCHIVE_PUBLIC_URL";
+pub const ENV_NOTIFY_WEBHOOK_URL: &str = "GIT_ARCHIVE_NOTIFY_WEBHOOK_URL";
+pub const ENV_NOTIFY_TELEGRAM_BOT_TOKEN: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_BOT_TOKEN";
+pub const ENV_NOTIFY_TELEGRAM_CHAT_ID: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_ID";
+pub const ENV_NOTIFY_TELEGRAM_API_URL: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL";
+pub const ENV_NOTIFY_LANG: &str = "GIT_ARCHIVE_NOTIFY_LANG";
+
+/// Telegram Bot API used when `GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL` is not set.
+pub const DEFAULT_TELEGRAM_API_URL: &str = "https://api.telegram.org";
 
 /// Port of the web UI when `GIT_ARCHIVE_LISTEN_ADDR` is not set.
 pub const DEFAULT_PORT: u16 = 8600;
@@ -55,6 +66,47 @@ pub struct Config {
     pub session_ttl_hours: u32,
     pub cookie_secure: bool,
     pub log_level: String,
+    /// Address of this site as users open it, without a trailing slash.
+    /// Notifications link to it when it is set.
+    pub public_url: Option<String>,
+    pub notify: NotifyConfig,
+}
+
+/// Notification channels from the environment; the settings page can
+/// override each value.
+#[derive(Clone)]
+pub struct NotifyConfig {
+    pub webhook_url: Option<String>,
+    pub telegram_bot_token: Option<String>,
+    pub telegram_chat_id: Option<String>,
+    pub telegram_api_url: String,
+    pub lang: Lang,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            webhook_url: None,
+            telegram_bot_token: None,
+            telegram_chat_id: None,
+            telegram_api_url: DEFAULT_TELEGRAM_API_URL.to_owned(),
+            lang: Lang::Tr,
+        }
+    }
+}
+
+impl fmt::Debug for NotifyConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // A webhook URL often holds its own secret, as Discord's and Slack's do.
+        let set = |value: &Option<String>| if value.is_some() { "<set>" } else { "<unset>" };
+        f.debug_struct("NotifyConfig")
+            .field("webhook_url", &set(&self.webhook_url))
+            .field("telegram_bot_token", &set(&self.telegram_bot_token))
+            .field("telegram_chat_id", &self.telegram_chat_id)
+            .field("telegram_api_url", &self.telegram_api_url)
+            .field("lang", &self.lang)
+            .finish()
+    }
 }
 
 impl fmt::Debug for Config {
@@ -73,6 +125,8 @@ impl fmt::Debug for Config {
             .field("session_ttl_hours", &self.session_ttl_hours)
             .field("cookie_secure", &self.cookie_secure)
             .field("log_level", &self.log_level)
+            .field("public_url", &self.public_url)
+            .field("notify", &self.notify)
             .finish()
     }
 }
@@ -93,6 +147,7 @@ impl Config {
         let mut config = Self::with_credentials(&env)?;
         config.apply_server_settings(&env)?;
         config.apply_sync_settings(&env)?;
+        config.apply_notify_settings(&env)?;
         Ok(config)
     }
 
@@ -115,7 +170,30 @@ impl Config {
             session_ttl_hours: 168,
             cookie_secure: false,
             log_level: String::from("info"),
+            public_url: None,
+            notify: NotifyConfig::default(),
         })
+    }
+
+    fn apply_notify_settings<F>(&mut self, env: &Env<F>) -> Result<(), ConfigError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        self.public_url = env.http_url(ENV_PUBLIC_URL)?;
+        let notify = &mut self.notify;
+        notify.webhook_url = env.http_url(ENV_NOTIFY_WEBHOOK_URL)?;
+        notify.telegram_bot_token = env.get(ENV_NOTIFY_TELEGRAM_BOT_TOKEN);
+        notify.telegram_chat_id = env.get(ENV_NOTIFY_TELEGRAM_CHAT_ID);
+        if let Some(url) = env.http_url(ENV_NOTIFY_TELEGRAM_API_URL)? {
+            notify.telegram_api_url = url;
+        }
+        if let Some(code) = env.get(ENV_NOTIFY_LANG) {
+            notify.lang = Lang::parse(&code).ok_or(ConfigError::Invalid {
+                name: ENV_NOTIFY_LANG,
+                reason: String::from("expected tr or en"),
+            })?;
+        }
+        Ok(())
     }
 
     fn apply_server_settings<F>(&mut self, env: &Env<F>) -> Result<(), ConfigError>
@@ -200,6 +278,20 @@ where
             });
         }
         Ok(value)
+    }
+
+    /// An http(s) URL without a trailing slash, or `None` when unset.
+    fn http_url(&self, name: &'static str) -> Result<Option<String>, ConfigError> {
+        let Some(raw) = self.get(name) else {
+            return Ok(None);
+        };
+        match crate::repo_url::parse_http_url(&raw) {
+            Some(url) => Ok(Some(url)),
+            None => Err(ConfigError::Invalid {
+                name,
+                reason: String::from("expected an http or https URL"),
+            }),
+        }
     }
 
     fn boolean(&self, name: &'static str, default: bool) -> Result<bool, ConfigError> {
@@ -344,6 +436,38 @@ mod tests {
         // Zero turns the integrity check off.
         assert_eq!(config.fsck_interval_days, 0);
         assert_eq!(config.repack_interval_days, 7);
+    }
+
+    #[test]
+    fn notification_settings_are_read_and_checked() {
+        let config = load(&required()).unwrap();
+        assert_eq!(config.notify.telegram_api_url, DEFAULT_TELEGRAM_API_URL);
+        assert_eq!(config.notify.lang, Lang::Tr);
+        assert_eq!(config.public_url, None);
+
+        let mut pairs = required();
+        pairs.push((ENV_PUBLIC_URL, "https://archive.example.com/"));
+        pairs.push((ENV_NOTIFY_WEBHOOK_URL, "https://hooks.example.com/x"));
+        pairs.push((ENV_NOTIFY_TELEGRAM_BOT_TOKEN, "123:abc"));
+        pairs.push((ENV_NOTIFY_LANG, "en"));
+        let config = load(&pairs).unwrap();
+        assert_eq!(
+            config.public_url.as_deref(),
+            Some("https://archive.example.com")
+        );
+        assert_eq!(config.notify.telegram_bot_token.as_deref(), Some("123:abc"));
+        assert_eq!(config.notify.lang, Lang::En);
+        let shown = format!("{config:?}");
+        assert!(!shown.contains("123:abc") && !shown.contains("hooks.example.com"));
+
+        for (name, value) in [(ENV_NOTIFY_WEBHOOK_URL, "ftp://x"), (ENV_NOTIFY_LANG, "de")] {
+            let mut pairs = required();
+            pairs.push((name, value));
+            assert!(matches!(
+                load(&pairs).unwrap_err(),
+                ConfigError::Invalid { .. }
+            ));
+        }
     }
 
     #[test]
