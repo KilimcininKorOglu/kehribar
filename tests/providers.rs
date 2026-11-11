@@ -8,7 +8,7 @@ use git_archive::db::sources::SourceKind;
 use git_archive::git::Credentials;
 use git_archive::providers::{ProviderError, RemoteRepo, list_repos};
 use serde_json::{Value, json};
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn host(provider: Provider, api: String) -> Host {
@@ -420,6 +420,211 @@ async fn bitbucket_refuses_a_next_link_on_another_server() {
         .unwrap_err();
     assert!(matches!(err, ProviderError::ForeignPage(_)), "{err}");
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+fn gitee_repo(n: usize) -> Value {
+    json!({ "html_url": format!("https://gitee.example/org/r{n}.git"), "fork": n == 1, "status": "开始" })
+}
+
+#[tokio::test]
+async fn gitee_pages_by_a_hundred_with_the_token_in_the_query() {
+    let server = MockServer::start().await;
+    for (page, body) in [
+        ("1", items(0, 100, gitee_repo)),
+        ("2", items(100, 1, gitee_repo)),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/api/v5/orgs/team/repos"))
+            .and(query_param("per_page", "100"))
+            .and(query_param("page", page))
+            .and(query_param("access_token", "gt"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let host = host(Provider::Gitee, format!("{}/api/v5", server.uri()));
+    let token = creds("git", "gt");
+    let repos = list_repos(&host, Some(&token), SourceKind::Org, "team")
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 101);
+    assert_eq!(repos[0].clone_url, "https://gitee.example/org/r0.git");
+    assert!(repos[1].fork && !repos[0].fork);
+
+    // A failed request names the URL without the token.
+    let err = list_repos(&host, Some(&token), SourceKind::Org, "missing")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ProviderError::Status { status: 404, .. }),
+        "{err}"
+    );
+    assert!(!err.to_string().contains("gt"), "{err}");
+}
+
+#[tokio::test]
+async fn gitee_lists_own_repositories_and_stars_of_others() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user"))
+        .and(query_param("access_token", "gt"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": "alice" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user/repos"))
+        .and(query_param("type", "owner"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(items(0, 1, gitee_repo)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/users/bob/starred"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(items(5, 1, gitee_repo)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let host = host(Provider::Gitee, format!("{}/api/v5", server.uri()));
+    let token = creds("git", "gt");
+    let own = list_repos(&host, Some(&token), SourceKind::User, "Alice")
+        .await
+        .unwrap();
+    assert_eq!(urls(&own), ["https://gitee.example/org/r0.git"]);
+    let stars = list_repos(&host, Some(&token), SourceKind::Starred, "bob")
+        .await
+        .unwrap();
+    assert_eq!(urls(&stars), ["https://gitee.example/org/r5.git"]);
+}
+
+#[tokio::test]
+async fn azure_lists_a_project_with_basic_auth_and_skips_disabled_repositories() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/fabrikam/Fiber/_apis/git/repositories"))
+        .and(query_param("api-version", "7.1"))
+        // `git:pat`: Azure DevOps ignores the username.
+        .and(header("authorization", "Basic Z2l0OnBhdA=="))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 3,
+            "value": [
+                { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/App", "isFork": false },
+                { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/Copy", "isFork": true },
+                { "remoteUrl": "https://fabrikam@dev.example/fabrikam/Fiber/_git/Old", "isDisabled": true }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let host = host(Provider::Azure, server.uri());
+    let token = creds("git", "pat");
+    let repos = list_repos(&host, Some(&token), SourceKind::Org, "fabrikam/Fiber")
+        .await
+        .unwrap();
+    assert_eq!(
+        repos,
+        [
+            RemoteRepo {
+                clone_url: "https://dev.example/fabrikam/Fiber/_git/App".into(),
+                fork: false,
+                archived: false,
+            },
+            RemoteRepo {
+                clone_url: "https://dev.example/fabrikam/Fiber/_git/Copy".into(),
+                fork: true,
+                archived: false,
+            },
+        ]
+    );
+    let err = list_repos(&host, Some(&token), SourceKind::User, "fabrikam")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "the azure provider has no user list");
+}
+
+fn sourcehut_page(names: &[&str], cursor: Option<&str>) -> Value {
+    let results: Vec<Value> = names.iter().map(|name| json!({ "name": name })).collect();
+    json!({ "data": { "user": {
+        "canonicalName": "~alice",
+        "repositories": { "results": results, "cursor": cursor }
+    }}})
+}
+
+#[tokio::test]
+async fn sourcehut_follows_the_cursor_with_a_bearer_token() {
+    let server = MockServer::start().await;
+    for (cursor, body) in [
+        (Value::Null, sourcehut_page(&["one", "two"], Some("c1"))),
+        (json!("c1"), sourcehut_page(&["three"], None)),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/query"))
+            .and(header("authorization", "Bearer srht"))
+            .and(body_partial_json(
+                json!({ "variables": { "username": "alice", "cursor": cursor } }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let host = host(Provider::Sourcehut, format!("{}/query", server.uri()));
+    let token = creds("git", "srht");
+    let repos = list_repos(&host, Some(&token), SourceKind::User, "~alice")
+        .await
+        .unwrap();
+    let base = server.uri();
+    assert_eq!(
+        urls(&repos),
+        [
+            format!("{base}/~alice/one"),
+            format!("{base}/~alice/two"),
+            format!("{base}/~alice/three")
+        ]
+    );
+    let err = list_repos(&host, Some(&token), SourceKind::Org, "team")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "the sourcehut provider has no org list");
+}
+
+#[tokio::test]
+async fn sourcehut_errors_and_unknown_users_are_errors() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/query"))
+        .and(body_partial_json(
+            json!({ "variables": { "username": "ghost" } }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": { "user": null } })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/query"))
+        .and(body_partial_json(
+            json!({ "variables": { "username": "alice" } }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": null,
+            "errors": [{ "message": "Authentication error" }]
+        })))
+        .mount(&server)
+        .await;
+    let host = host(Provider::Sourcehut, format!("{}/query", server.uri()));
+    let err = list_repos(&host, None, SourceKind::User, "ghost")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the API answered with an error: no user named ghost"
+    );
+    let err = list_repos(&host, None, SourceKind::User, "alice")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the API answered with an error: Authentication error"
+    );
 }
 
 #[tokio::test]

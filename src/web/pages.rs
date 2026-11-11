@@ -102,6 +102,9 @@ impl Layout {
             Provider::Gitlab => "provider.gitlab",
             Provider::Forgejo => "provider.forgejo",
             Provider::Bitbucket => "provider.bitbucket",
+            Provider::Gitee => "provider.gitee",
+            Provider::Azure => "provider.azure",
+            Provider::Sourcehut => "provider.sourcehut",
             Provider::Generic => "provider.generic",
         })
     }

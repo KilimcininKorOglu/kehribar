@@ -281,6 +281,45 @@ async fn a_gist_source_adds_gists_without_a_wiki() {
 }
 
 #[tokio::test]
+async fn an_azure_project_source_archives_repositories_under_the_project() {
+    let t = TestApp::new().await;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/fabrikam/Fiber/_apis/git/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+            { "remoteUrl": "https://fabrikam@dev.azure.com/fabrikam/Fiber/_git/App" }
+        ]})))
+        .mount(&server)
+        .await;
+    let input = HostInput {
+        host: "dev.azure.com",
+        provider: Provider::Azure,
+        api_base_url: Some(&server.uri()),
+        username: None,
+        token_enc: None,
+    };
+    let host_id = hosts::insert(&t.state.pool, &input, unix_now())
+        .await
+        .unwrap();
+    let response = t
+        .post(
+            "/sources",
+            &format!("host_id={host_id}&kind=org&name=fabrikam%2FFiber&auto_add=1"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let source = sources::list(&t.state.pool).await.unwrap().remove(0);
+    let scanned = scan(&t, source.id).await;
+    assert_eq!(scanned.last_error, None);
+    let repo = repos::list(&t.state.pool, None).await.unwrap().remove(0);
+    assert_eq!(repo.url, "https://dev.azure.com/fabrikam/Fiber/_git/App");
+    assert_eq!(
+        (repo.owner.as_str(), repo.name.as_str()),
+        ("fabrikam/Fiber", "App")
+    );
+}
+
+#[tokio::test]
 async fn repositories_on_another_host_are_reported_not_added() {
     let t = TestApp::new().await;
     let server = MockServer::start().await;
@@ -444,6 +483,19 @@ async fn invalid_source_forms_are_rejected() {
     )
     .await
     .unwrap();
+    let azure = hosts::insert(
+        &t.state.pool,
+        &HostInput {
+            host: "dev.azure.com",
+            provider: Provider::Azure,
+            api_base_url: None,
+            username: None,
+            token_enc: None,
+        },
+        unix_now(),
+    )
+    .await
+    .unwrap();
     let cases = [
         (
             format!("host_id={generic}&kind=org&name=octo"),
@@ -459,11 +511,19 @@ async fn invalid_source_forms_are_rejected() {
         ),
         (
             format!("host_id={bitbucket}&kind=starred&name=alice"),
-            "Yıldızlananlar yalnız GitHub, GitLab ve Forgejo",
+            "Yıldızlananlar yalnız GitHub, GitLab, Forgejo / Gitea ve Gitee",
         ),
         (
             format!("host_id={github}&kind=org&name=a%2Fb"),
-            "yalnız GitLab gruplarında kullanılabilir",
+            "yalnız GitLab gruplarında ve Azure DevOps",
+        ),
+        (
+            format!("host_id={azure}&kind=org&name=org%2Fproject%2Fextra"),
+            "yalnız GitLab gruplarında ve Azure DevOps",
+        ),
+        (
+            format!("host_id={azure}&kind=user&name=alice"),
+            "Azure DevOps yalnız organizasyonları",
         ),
         (
             format!("host_id={github}&kind=org&name=%3Cscript%3E"),

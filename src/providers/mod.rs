@@ -1,11 +1,15 @@
 //! Lists the repositories of a user or an organization, or the ones a user
-//! starred, through the REST API of a hosting provider: GitHub, GitLab,
-//! Forgejo/Gitea or Bitbucket Cloud. Every list is read to its last page.
+//! starred, through the API of a hosting provider: GitHub, GitLab,
+//! Forgejo/Gitea, Bitbucket Cloud, Gitee, Azure DevOps or SourceHut. Every
+//! list is read to its last page.
 
+mod azure;
 mod bitbucket;
 mod forgejo;
+mod gitee;
 mod github;
 mod gitlab;
+mod sourcehut;
 
 use std::time::Duration;
 
@@ -52,6 +56,8 @@ pub enum ProviderError {
     TooManyPages,
     #[error("the API sent a next page on another server: {0}")]
     ForeignPage(String),
+    #[error("the API answered with an error: {0}")]
+    Answer(String),
 }
 
 impl ProviderError {
@@ -73,13 +79,15 @@ impl From<reqwest::Error> for ProviderError {
 /// How a request proves who it is.
 enum Auth {
     None,
-    /// `Authorization: Bearer <token>` (GitHub).
+    /// `Authorization: Bearer <token>` (GitHub, SourceHut).
     Bearer(String),
+    /// The `access_token` query parameter (Gitee).
+    Query(String),
     /// `PRIVATE-TOKEN: <token>` (GitLab).
     PrivateToken(String),
     /// `Authorization: token <token>` (Forgejo, Gitea).
     Token(String),
-    /// HTTP Basic with the account name (Bitbucket).
+    /// HTTP Basic with the account name (Bitbucket, Azure DevOps).
     Basic {
         username: String,
         password: String,
@@ -105,13 +113,18 @@ impl Api {
         Ok(url)
     }
 
-    fn get(&self, url: Url) -> RequestBuilder {
-        let request = self
-            .client
-            .get(url)
-            .header(reqwest::header::ACCEPT, "application/json");
+    fn get(&self, mut url: Url) -> RequestBuilder {
+        if let Auth::Query(token) = &self.auth {
+            // Error messages drop the query, so the token stays out of them.
+            url.query_pairs_mut().append_pair("access_token", token);
+        }
+        self.authorized(self.client.get(url))
+    }
+
+    fn authorized(&self, request: RequestBuilder) -> RequestBuilder {
+        let request = request.header(reqwest::header::ACCEPT, "application/json");
         match &self.auth {
-            Auth::None => request,
+            Auth::None | Auth::Query(_) => request,
             Auth::Bearer(token) => request.bearer_auth(token),
             Auth::PrivateToken(token) => request.header("PRIVATE-TOKEN", token),
             Auth::Token(token) => {
@@ -122,15 +135,18 @@ impl Api {
     }
 
     async fn send(&self, url: Url) -> Result<Response, ProviderError> {
-        let response = self.get(url.clone()).send().await?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ProviderError::Status {
-                status: status.as_u16(),
-                url: strip_query(url),
-            });
-        }
-        Ok(response)
+        checked(self.get(url.clone()).send().await?, url)
+    }
+
+    /// Posts `body` as JSON to the base URL and reads the JSON answer.
+    async fn post_json<T: DeserializeOwned>(
+        &self,
+        body: &serde_json::Value,
+    ) -> Result<T, ProviderError> {
+        let request = self.authorized(self.client.post(self.base.clone()).json(body));
+        Ok(checked(request.send().await?, self.base.clone())?
+            .json()
+            .await?)
     }
 
     async fn json<T: DeserializeOwned>(&self, url: Url) -> Result<T, ProviderError> {
@@ -166,17 +182,25 @@ impl Api {
 /// The API base of a host when the host leaves it blank, or `None` for a
 /// provider without a list API.
 pub fn default_api_base(provider: Provider, host: &str) -> Option<String> {
+    match (provider, host) {
+        (Provider::Github, "github.com") => Some("https://api.github.com".to_owned()),
+        (Provider::Bitbucket, "bitbucket.org") => Some("https://api.bitbucket.org/2.0".to_owned()),
+        (Provider::Bitbucket, _) => Some(format!("https://api.{host}/2.0")),
+        _ => api_path(provider).map(|path| format!("https://{host}{path}")),
+    }
+}
+
+/// The API path below the host name of a self-hosted server, as GitHub
+/// Enterprise Server, Azure DevOps Server and the others use it.
+fn api_path(provider: Provider) -> Option<&'static str> {
     match provider {
-        Provider::Github if host == "github.com" => Some("https://api.github.com".to_owned()),
-        // GitHub Enterprise Server.
-        Provider::Github => Some(format!("https://{host}/api/v3")),
-        Provider::Gitlab => Some(format!("https://{host}/api/v4")),
-        Provider::Forgejo => Some(format!("https://{host}/api/v1")),
-        Provider::Bitbucket if host == "bitbucket.org" => {
-            Some("https://api.bitbucket.org/2.0".to_owned())
-        }
-        Provider::Bitbucket => Some(format!("https://api.{host}/2.0")),
-        Provider::Generic => None,
+        Provider::Github => Some("/api/v3"),
+        Provider::Gitlab => Some("/api/v4"),
+        Provider::Forgejo => Some("/api/v1"),
+        Provider::Gitee => Some("/api/v5"),
+        Provider::Azure => Some(""),
+        Provider::Sourcehut => Some("/query"),
+        Provider::Bitbucket | Provider::Generic => None,
     }
 }
 
@@ -185,18 +209,31 @@ pub fn can_list(provider: Provider) -> bool {
     provider != Provider::Generic
 }
 
-/// Whether the provider of `host` can list sources of `kind`. Gists exist
-/// only on github.com.
+/// Whether the provider of `host` can list sources of `kind`. Azure DevOps
+/// lists organizations and projects only, SourceHut users only, and gists
+/// exist only on github.com.
 pub fn supports(host: &Host, kind: SourceKind) -> bool {
     match kind {
-        SourceKind::User | SourceKind::Org => can_list(host.provider),
+        SourceKind::User => can_list(host.provider) && host.provider != Provider::Azure,
+        SourceKind::Org => can_list(host.provider) && host.provider != Provider::Sourcehut,
         SourceKind::Starred => matches!(
             host.provider,
-            Provider::Github | Provider::Gitlab | Provider::Forgejo
+            Provider::Github | Provider::Gitlab | Provider::Forgejo | Provider::Gitee
         ),
         SourceKind::Gists => {
             host.provider == Provider::Github && host.host == repo_url::settings_host(GIST_HOST)
         }
+    }
+}
+
+/// How many `/`-separated parts a source name of `kind` may have: GitLab
+/// groups nest, and an Azure DevOps source is an organization or
+/// `organization/project`.
+pub fn name_depth(provider: Provider, kind: SourceKind) -> usize {
+    match (provider, kind) {
+        (Provider::Gitlab, SourceKind::Org) => usize::MAX,
+        (Provider::Azure, SourceKind::Org) => 2,
+        _ => 1,
     }
 }
 
@@ -212,11 +249,23 @@ pub async fn list_repos(
         return Err(ProviderError::kind(host.provider, kind));
     }
     let api = connect(host, credentials)?;
-    match host.provider {
-        Provider::Github => github::list(&api, kind, name).await,
-        Provider::Gitlab => gitlab::list(&api, kind, name).await,
-        Provider::Forgejo => forgejo::list(&api, kind, name).await,
-        Provider::Bitbucket => bitbucket::list(&api, name).await,
+    list_with(&api, host.provider, kind, name).await
+}
+
+async fn list_with(
+    api: &Api,
+    provider: Provider,
+    kind: SourceKind,
+    name: &str,
+) -> Result<Vec<RemoteRepo>, ProviderError> {
+    match provider {
+        Provider::Github => github::list(api, kind, name).await,
+        Provider::Gitlab => gitlab::list(api, kind, name).await,
+        Provider::Forgejo => forgejo::list(api, kind, name).await,
+        Provider::Bitbucket => bitbucket::list(api, name).await,
+        Provider::Gitee => gitee::list(api, kind, name).await,
+        Provider::Azure => azure::list(api, name).await,
+        Provider::Sourcehut => sourcehut::list(api, name).await,
         Provider::Generic => Err(ProviderError::Unsupported(Provider::Generic.code())),
     }
 }
@@ -245,15 +294,29 @@ fn auth(provider: Provider, credentials: Option<&Credentials>) -> Auth {
     };
     let token = credentials.password.clone();
     match provider {
-        Provider::Github => Auth::Bearer(token),
+        Provider::Github | Provider::Sourcehut => Auth::Bearer(token),
         Provider::Gitlab => Auth::PrivateToken(token),
         Provider::Forgejo => Auth::Token(token),
-        Provider::Bitbucket => Auth::Basic {
+        Provider::Gitee => Auth::Query(token),
+        // Azure DevOps ignores the username next to a personal access token.
+        Provider::Bitbucket | Provider::Azure => Auth::Basic {
             username: credentials.username.clone(),
             password: token,
         },
         Provider::Generic => Auth::None,
     }
+}
+
+/// The response when its status is a success, else an error naming `url`.
+fn checked(response: Response, url: Url) -> Result<Response, ProviderError> {
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ProviderError::Status {
+            status: status.as_u16(),
+            url: strip_query(url),
+        });
+    }
+    Ok(response)
 }
 
 /// The URL without its query, for error messages.
@@ -293,6 +356,21 @@ mod tests {
                 Provider::Bitbucket,
                 "bitbucket.org",
                 Some("https://api.bitbucket.org/2.0"),
+            ),
+            (
+                Provider::Gitee,
+                "gitee.com",
+                Some("https://gitee.com/api/v5"),
+            ),
+            (
+                Provider::Azure,
+                "dev.azure.com",
+                Some("https://dev.azure.com"),
+            ),
+            (
+                Provider::Sourcehut,
+                "git.sr.ht",
+                Some("https://git.sr.ht/query"),
             ),
             (Provider::Generic, "git.example", None),
         ];

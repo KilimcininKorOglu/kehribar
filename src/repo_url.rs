@@ -55,6 +55,10 @@ pub const GIST_HOST: &str = "gist.github.com";
 
 /// The host whose settings and token a repository on `host` uses: gists
 /// use the ones of github.com.
+/// The path segment before the repository name in Azure DevOps URLs:
+/// `https://dev.azure.com/<org>/<project>/_git/<name>`.
+const AZURE_GIT_SEGMENT: &str = "_git";
+
 pub fn settings_host(host: &str) -> &str {
     if host == GIST_HOST {
         "github.com"
@@ -72,6 +76,8 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         return parse_gist(url.scheme(), &segments);
     }
     let (last, owners) = segments.split_last().ok_or(UrlError::Path)?;
+    // Azure DevOps puts `_git` before the name; the archive path leaves it out.
+    let owners = owners.strip_suffix(&[AZURE_GIT_SEGMENT]).unwrap_or(owners);
     let name = last.strip_suffix(".git").unwrap_or(last);
     if owners.is_empty() || !is_safe_segment(name) {
         return Err(UrlError::Path);
@@ -299,6 +305,27 @@ mod tests {
         assert_eq!(parse("https://gist.github.com/a/b/c"), Err(UrlError::Path));
         assert_eq!(settings_host("gist.github.com"), "github.com");
         assert_eq!(settings_host("gitlab.com"), "gitlab.com");
+    }
+
+    #[test]
+    fn azure_devops_urls_are_archived_without_the_git_segment() {
+        assert_eq!(
+            parse("https://dev.azure.com/fabrikam/Fiber/_git/App").unwrap(),
+            location(
+                "https://dev.azure.com/fabrikam/Fiber/_git/App",
+                "dev.azure.com",
+                "fabrikam/Fiber",
+                "App"
+            )
+        );
+        // A repository named like its project has no project segment.
+        let parsed = parse("https://dev.azure.com/fabrikam/_git/Fiber").unwrap();
+        assert_eq!(parsed.url, "https://dev.azure.com/fabrikam/_git/Fiber");
+        assert_eq!(
+            (parsed.owner.as_str(), parsed.name.as_str()),
+            ("fabrikam", "Fiber")
+        );
+        assert_eq!(parse("https://dev.azure.com/_git/App"), Err(UrlError::Path));
     }
 
     #[test]

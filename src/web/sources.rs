@@ -14,7 +14,7 @@ use serde::Deserialize;
 use super::form::is_checked;
 use super::pages::{Layout, Nav, render};
 use super::repos::{NoticeQuery, PageContext};
-use crate::db::hosts::{self, Host, Provider};
+use crate::db::hosts::{self, Host};
 use crate::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use crate::db::unix_now;
 use crate::error::AppError;
@@ -204,9 +204,10 @@ async fn validate(
     if !providers::supports(&host, kind) {
         return Ok(Err("sources.kind_unsupported"));
     }
-    // Only GitLab groups nest.
-    let nested = host.provider == Provider::Gitlab && kind == SourceKind::Org;
-    let Some(name) = repo_url::parse_owner(&form.name, nested) else {
+    let depth = providers::name_depth(host.provider, kind);
+    let name = repo_url::parse_owner(&form.name, depth > 1)
+        .filter(|name| name.split('/').count() <= depth);
+    let Some(name) = name else {
         return Ok(Err("sources.invalid_name"));
     };
     Ok(Ok((host, kind, name)))

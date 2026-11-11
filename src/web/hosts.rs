@@ -69,7 +69,7 @@ impl HostFields {
         }
     }
 
-    pub fn providers(&self) -> [Provider; 5] {
+    pub fn providers(&self) -> [Provider; Provider::ALL.len()] {
         Provider::ALL
     }
 

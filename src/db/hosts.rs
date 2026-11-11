@@ -10,6 +10,9 @@ text_enum! {
         Gitlab => "gitlab",
         Forgejo => "forgejo",
         Bitbucket => "bitbucket",
+        Gitee => "gitee",
+        Azure => "azure",
+        Sourcehut => "sourcehut",
         Generic => "generic",
     }
 }

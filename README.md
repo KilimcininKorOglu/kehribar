@@ -1,6 +1,6 @@
 # git-archive
 
-git-archive keeps complete mirrors of Git repositories from GitHub, GitLab, Forgejo, Gitea, Bitbucket Cloud or any Git server that speaks HTTP(S). It fetches every branch, tag and commit, and the wiki when there is one, on a schedule. A web interface shows the archived code, and the archives can be cloned or downloaded back at any time.
+git-archive keeps complete mirrors of Git repositories from GitHub, GitLab, Forgejo, Gitea, Bitbucket Cloud, Gitee, Azure DevOps, SourceHut or any Git server that speaks HTTP(S). It fetches every branch, tag and commit, and the wiki when there is one, on a schedule. A web interface shows the archived code, and the archives can be cloned or downloaded back at any time.
 
 The archive never loses data that it fetched once:
 
@@ -14,7 +14,7 @@ Pull requests, issues and Git LFS objects are not archived.
 
 ## Features
 
-- Add a repository by URL, or import every repository of a user, an organization, a GitLab group (with subgroups) or a Bitbucket workspace.
+- Add a repository by URL, or import every repository of a user, an organization, a GitLab group (with subgroups), a Bitbucket workspace or an Azure DevOps organization or project.
 - Watched sources: scheduled scans add the repositories that appear later. Forks are optional per source.
 - A global sync interval, a per-repository interval and a "sync now" button.
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
@@ -146,6 +146,9 @@ The API URL of a host is optional. When it is empty, it is derived from the host
 | GitLab | `https://<host>/api/v4` |
 | Forgejo / Gitea | `https://<host>/api/v1` |
 | Bitbucket | `https://api.bitbucket.org/2.0` for bitbucket.org |
+| Gitee | `https://<host>/api/v5` |
+| Azure DevOps | `https://<host>`; for Azure DevOps Server, enter the collection URL, for example `https://tfs.example/tfs/DefaultCollection`, and the project as the source name |
+| SourceHut | `https://<host>/query`, so the host is `git.sr.ht` |
 
 Tokens with read access are enough:
 
@@ -154,7 +157,13 @@ Tokens with read access are enough:
 - Forgejo / Gitea: an access token with read permission for repositories, and for organizations and users when you import them.
 - Bitbucket Cloud: an API token with scopes (app passwords no longer work), created for the Bitbucket app with the `read:repository:bitbucket` scope. Put the email address of the Atlassian account in the username field. The REST API authenticates with that email; for Git, git-archive sends the fixed username `x-bitbucket-api-token-auth` that Bitbucket requires with API tokens.
 
-The username field may stay empty for GitHub, GitLab, Forgejo and Gitea.
+- Gitee: a personal access token with read access to repositories. The API receives it in the `access_token` query parameter.
+- Azure DevOps: a personal access token with the "Code (Read)" scope (`vso.code`). Azure DevOps ignores the username.
+- SourceHut: a personal access token for git.sr.ht with read access to profile and repositories. The SourceHut API does not answer without a token.
+
+The username field may stay empty for GitHub, GitLab, Forgejo, Gitea, Gitee, Azure DevOps and SourceHut.
+
+An Azure DevOps source is an organization (every project) or `organization/project`. Repository URLs keep their `_git` segment for fetching, but the archive path leaves it out: `dev.azure.com/<org>/<project>/<name>`. Disabled Azure DevOps repositories are skipped. A SourceHut source is a user, with or without its `~`. Gitee, Azure DevOps and SourceHut report no archived state, so "skip archived repositories" has no effect on them.
 
 ## Importing users and organizations
 
