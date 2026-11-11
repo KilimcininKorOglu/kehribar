@@ -485,7 +485,7 @@ download = "İndir:"
 
 [clone]
 title = "Arşivden klonla"
-help = "Git kullanıcı adı ve parola sorduğunda bu sitenin yönetici bilgilerini girin. Bu komut branch'leri ve tag'leri getirir."
+help = "Git kullanıcı adı ve parola sorduğunda bu sitenin yönetici bilgilerini girin. Erişim token'ları sayfasındaki bir clone token'ını da parola olarak kullanabilirsiniz; o zaman kullanıcı adı önemli değildir. Bu komut branch'leri ve tag'leri getirir."
 mirror_help = "--mirror ile klonlarsanız arşivde saklanan yeniden yazılmış geçmiş dahil bütün ref'ler gelir."
 
 [change]

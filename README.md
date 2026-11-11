@@ -229,7 +229,7 @@ For GitHub, a user source lists the private repositories too when the host token
 
 ## Getting an archive back
 
-Clone from the archive with the admin credentials. The repository page shows the URL:
+Clone from the archive with the admin credentials or a clone token. The repository page shows the URL:
 
 ```sh
 git clone http://localhost:8600/git/github.com/owner/name.git
@@ -237,7 +237,13 @@ git clone http://localhost:8600/git/github.com/owner/name.git
 git clone --mirror http://localhost:8600/git/github.com/owner/name.git
 ```
 
-The server accepts only fetches; a push is refused. The file view has ZIP and tar.gz downloads of the selected revision.
+A clone token is created on Settings, "Access tokens" (`/settings/tokens`). It opens every repository or only the selected ones, may expire after 30, 90 or 365 days, and can be revoked at any time. Git sends it as the password; the username is not checked. The page shows a new token once; the database keeps only its SHA-256 hash. A repository outside the token's selection answers 404, as if it did not exist.
+
+```sh
+git clone http://token:gac_...@localhost:8600/git/github.com/owner/name.git
+```
+
+The server accepts only fetches; a push is refused. Wrong credentials count against the same per-address lockout as the login form. The file view has ZIP and tar.gz downloads of the selected revision.
 
 ## Development
 

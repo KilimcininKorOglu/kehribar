@@ -12,7 +12,9 @@ use std::process::{Command, Output};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use base64::prelude::{BASE64_STANDARD, Engine as _};
-use common::{PASSWORD, TestApp, USER, git_in, header_value, send, source_repo};
+use common::{
+    PASSWORD, TestApp, USER, add_repo, create_token, git_in, header_value, send, source_repo,
+};
 use git_archive::db::repos::{self, NewRepo, RepoStatus};
 use git_archive::db::unix_now;
 use git_archive::web::{self, auth::MAX_FAILED_LOGINS};
@@ -218,6 +220,67 @@ async fn clone_needs_the_admin_credentials() {
         send(&t.app, with_cookie).await.status(),
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn clone_tokens_open_their_repositories_only() {
+    let (t, source) = archived().await;
+    let other = add_repo(&t, "other").await;
+    let all = create_token(&t, "kind=clone&name=all&scope=all").await;
+    let mine = create_token(&t, "kind=clone&name=mine&scope=selected&repo=1").await;
+    let elsewhere = create_token(
+        &t,
+        &format!("kind=clone&name=elsewhere&scope=selected&repo={other}"),
+    )
+    .await;
+    let api = create_token(&t, "kind=api&name=api&permission=write").await;
+
+    // A real clone with the token as the password and any username.
+    let addr = serve(&t).await;
+    let work = t.dir.path();
+    let url = format!("http://anyone:{all}@{addr}{REPO_PATH}");
+    let output = git(work, &["clone", "--quiet", &url, "copy"]).await;
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        git_in(&work.join("copy"), &["rev-parse", "HEAD"]),
+        git_in(&source, &["rev-parse", "main"])
+    );
+    let used: Option<i64> =
+        sqlx::query_scalar("SELECT last_used_at FROM access_tokens WHERE name = 'all'")
+            .fetch_one(&t.state.pool)
+            .await
+            .unwrap();
+    assert!(used.is_some());
+
+    let status = |password: String| {
+        let app = t.app.clone();
+        async move {
+            send(&app, advertise_request(Some(&basic("x", &password))))
+                .await
+                .status()
+        }
+    };
+    assert_eq!(status(mine.clone()).await, StatusCode::OK);
+    // Outside its scope the repository does not exist for the token.
+    assert_eq!(status(elsewhere).await, StatusCode::NOT_FOUND);
+    // An API token is not a clone token.
+    assert_eq!(status(api).await, StatusCode::UNAUTHORIZED);
+
+    // An expired token and a revoked one are refused.
+    sqlx::query("UPDATE access_tokens SET expires_at = 1 WHERE name = 'mine'")
+        .execute(&t.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(status(mine).await, StatusCode::UNAUTHORIZED);
+    sqlx::query("DELETE FROM access_tokens WHERE name = 'all'")
+        .execute(&t.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(status(all).await, StatusCode::UNAUTHORIZED);
+    // The admin password still works.
+    assert_eq!(status(PASSWORD.to_owned()).await, StatusCode::UNAUTHORIZED);
+    let admin = send(&t.app, advertise_request(Some(&basic(USER, PASSWORD)))).await;
+    assert_eq!(admin.status(), StatusCode::OK);
 }
 
 #[tokio::test]

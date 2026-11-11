@@ -2,8 +2,8 @@
 //! `git clone http://<site>/git/<host>/<owner>/<name>.git`.
 //!
 //! Only the two upload-pack requests of the smart protocol are served.
-//! Pushing is refused, and every request needs the admin credentials
-//! through HTTP Basic authentication.
+//! Pushing is refused, and every request needs HTTP Basic authentication:
+//! the admin credentials, or a clone token as the password.
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
@@ -16,8 +16,11 @@ use base64::prelude::{BASE64_STANDARD, Engine as _};
 use tokio_util::io::ReaderStream;
 
 use super::AppState;
-use super::auth::secrets_equal;
-use crate::db::repos;
+use super::auth::{hash_token, secrets_equal};
+use super::tokens::CLONE_PREFIX;
+use crate::db::repos::{self, Repo};
+use crate::db::tokens::{self, AccessToken, TokenKind};
+use crate::db::unix_now;
 use crate::git::http_backend::{self, CgiRequest};
 use crate::repo_url;
 
@@ -82,6 +85,8 @@ enum Denied {
     Locked,
     /// No or wrong credentials: ask for them.
     Challenge,
+    /// The token could not be checked.
+    Failed,
 }
 
 impl IntoResponse for Denied {
@@ -89,12 +94,22 @@ impl IntoResponse for Denied {
         match self {
             Self::Locked => StatusCode::TOO_MANY_REQUESTS.into_response(),
             Self::Challenge => challenge(),
+            Self::Failed => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     }
 }
 
-/// Checks the Basic credentials.
-fn authenticate(state: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<(), Denied> {
+/// Who sent a request.
+#[derive(Debug)]
+enum Caller {
+    Admin,
+    /// A clone token, which may open only some repositories.
+    Token(AccessToken),
+}
+
+/// Checks the Basic credentials: the admin's, or a clone token as the
+/// password with any username.
+async fn authenticate(state: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<Caller, Denied> {
     let now = Instant::now();
     if state.limiter.is_locked(ip, now) {
         tracing::warn!(%ip, "git request refused, too many failures");
@@ -104,27 +119,51 @@ fn authenticate(state: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<(),
     let Some(value) = headers.get(header::AUTHORIZATION) else {
         return Err(Denied::Challenge);
     };
-    if credentials_match(state, value) {
+    let caller = caller_of(state, value).await.map_err(|err| {
+        tracing::error!(%err, "cannot check a clone token");
+        Denied::Failed
+    })?;
+    if let Some(caller) = caller {
         state.limiter.reset(ip);
-        return Ok(());
+        return Ok(caller);
     }
     state.limiter.record_failure(ip, now);
     tracing::warn!(%ip, "git request with wrong credentials");
     Err(Denied::Challenge)
 }
 
-fn credentials_match(state: &AppState, value: &HeaderValue) -> bool {
+/// `(user, password)` of a Basic `Authorization` value.
+fn basic_credentials(value: &HeaderValue) -> Option<(String, String)> {
     let decoded = value
         .to_str()
-        .ok()
-        .and_then(|v| v.strip_prefix("Basic "))
+        .ok()?
+        .strip_prefix("Basic ")
         .and_then(|encoded| BASE64_STANDARD.decode(encoded.trim()).ok())
-        .and_then(|bytes| String::from_utf8(bytes).ok());
-    let Some((user, password)) = decoded.as_deref().and_then(|d| d.split_once(':')) else {
-        return false;
+        .and_then(|bytes| String::from_utf8(bytes).ok())?;
+    let (user, password) = decoded.split_once(':')?;
+    Some((user.to_owned(), password.to_owned()))
+}
+
+/// The caller the credentials name; `None` when they name nobody.
+async fn caller_of(state: &AppState, value: &HeaderValue) -> sqlx::Result<Option<Caller>> {
+    let Some((user, password)) = basic_credentials(value) else {
+        return Ok(None);
     };
-    secrets_equal(user, &state.config.admin_username)
-        & secrets_equal(password, &state.config.admin_password)
+    let is_admin = secrets_equal(&user, &state.config.admin_username)
+        & secrets_equal(&password, &state.config.admin_password);
+    if is_admin {
+        return Ok(Some(Caller::Admin));
+    }
+    if !password.starts_with(CLONE_PREFIX) {
+        return Ok(None);
+    }
+    let now = unix_now();
+    let token =
+        tokens::find_valid(&state.pool, &hash_token(&password), TokenKind::Clone, now).await?;
+    if let Some(token) = &token {
+        tokens::touch_used(&state.pool, token.id, now).await?;
+    }
+    Ok(token.map(Caller::Token))
 }
 
 fn challenge() -> Response {
@@ -146,12 +185,34 @@ pub async fn serve(
         Ok(found) => found,
         Err(status) => return status.into_response(),
     };
-    if let Err(denied) = authenticate(&state, peer.ip(), request.headers()) {
-        return denied.into_response();
-    }
-    match backend(&state, &repo_path, service, request).await {
+    let caller = match authenticate(&state, peer.ip(), request.headers()).await {
+        Ok(caller) => caller,
+        Err(denied) => return denied.into_response(),
+    };
+    match backend(&state, &repo_path, service, &caller, request).await {
         Ok(response) => response,
         Err(status) => status.into_response(),
+    }
+}
+
+/// The repository at `repo_path`, if the caller may fetch it. A repository
+/// outside a token's scope is not found, as if it did not exist.
+async fn find_repo(state: &AppState, repo_path: &str, caller: &Caller) -> Result<Repo, StatusCode> {
+    let (host, owner, name) = split_repo_path(repo_path).ok_or(StatusCode::NOT_FOUND)?;
+    let repo = repos::find_by_path(&state.pool, host, &owner, name)
+        .await
+        .map_err(|err| internal(&err))?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let allowed = match caller {
+        Caller::Admin => true,
+        Caller::Token(token) => tokens::allows_repo(&state.pool, token, repo.id)
+            .await
+            .map_err(|err| internal(&err))?,
+    };
+    if allowed {
+        Ok(repo)
+    } else {
+        Err(StatusCode::NOT_FOUND)
     }
 }
 
@@ -159,13 +220,10 @@ async fn backend(
     state: &AppState,
     repo_path: &str,
     service: Service,
+    caller: &Caller,
     request: Request,
 ) -> Result<Response, StatusCode> {
-    let (host, owner, name) = split_repo_path(repo_path).ok_or(StatusCode::NOT_FOUND)?;
-    let repo = repos::find_by_path(&state.pool, host, &owner, name)
-        .await
-        .map_err(|err| internal(&err))?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let repo = find_repo(state, repo_path, caller).await?;
     let dir = repo_url::archive_dir(&state.config.data_dir, &repo.host, &repo.owner, &repo.name);
     let (Some(root), Some(dir_name)) = (dir.parent(), dir.file_name()) else {
         return Err(StatusCode::NOT_FOUND);
