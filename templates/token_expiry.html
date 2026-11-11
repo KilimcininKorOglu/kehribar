@@ -1,0 +1,9 @@
+    <label class="field">
+      <span>{{ layout.t("tokens.expiry") }}</span>
+      <select name="expiry">
+        <option value="">{{ layout.t("tokens.no_expiry") }}</option>
+        {% for days in expiry_days() %}
+        <option value="{{ days }}">{{ layout.tf_number("tokens.days", days) }}</option>
+        {% endfor %}
+      </select>
+    </label>

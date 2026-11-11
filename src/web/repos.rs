@@ -676,18 +676,26 @@ async fn detail_page(
     })
 }
 
-/// `http(s)://<site>/git/<host>/<owner>/<name>.git`. The scheme follows the
-/// secure-cookie setting, which is on when the site runs behind HTTPS.
-fn clone_url(ctx: &PageContext, repo: &Repo) -> String {
+/// `http(s)://<site>`, as the browser reached the site. The scheme follows
+/// the secure-cookie setting, which is on when the site runs behind HTTPS.
+pub(super) fn site_url(ctx: &PageContext) -> String {
     let scheme = if ctx.state.config.cookie_secure {
         "https"
     } else {
         "http"
     };
     let site = ctx.host.as_deref().unwrap_or("localhost");
+    format!("{scheme}://{site}")
+}
+
+/// `http(s)://<site>/git/<host>/<owner>/<name>.git`.
+fn clone_url(ctx: &PageContext, repo: &Repo) -> String {
     format!(
-        "{scheme}://{site}/git/{}/{}/{}.git",
-        repo.host, repo.owner, repo.name
+        "{}/git/{}/{}/{}.git",
+        site_url(ctx),
+        repo.host,
+        repo.owner,
+        repo.name
     )
 }
 

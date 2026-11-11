@@ -261,9 +261,57 @@ pub async fn archive_source(t: &TestApp, source: &Path, wiki_enabled: bool) -> d
     repo
 }
 
+/// Records `example.com/team/<name>` without archiving it; returns its id.
+pub async fn add_repo(t: &TestApp, name: &str) -> i64 {
+    use git_archive::db::repos::{self, NewRepo};
+
+    let url = format!("https://example.com/team/{name}");
+    let repo = NewRepo {
+        url: &url,
+        host: "example.com",
+        owner: "team",
+        name,
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled: false,
+    };
+    repos::insert(&t.state.pool, &repo, db::unix_now())
+        .await
+        .unwrap()
+        .expect("a new repository")
+}
+
 /// The status and the body of a page.
 pub async fn page(t: &TestApp, uri: &str) -> (StatusCode, String) {
-    let response = t.get(uri).await;
+    status_and_body(t.get(uri).await).await
+}
+
+/// The status and the body of the answer to a signed-in form post.
+pub async fn post_page(t: &TestApp, uri: &str, body: &str) -> (StatusCode, String) {
+    status_and_body(t.post(uri, body).await).await
+}
+
+/// The token in a page that shows a new one: `prefix` and 64 hex digits.
+pub fn shown_token(html: &str, prefix: &str) -> String {
+    let start = html.find(prefix).expect("a shown token");
+    html[start..start + prefix.len() + 64].to_owned()
+}
+
+/// Creates an access token with the tokens page form `body` and returns it.
+pub async fn create_token(t: &TestApp, body: &str) -> String {
+    let (status, html) = post_page(t, "/settings/tokens", body).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    let prefix = if body.contains("kind=clone") {
+        "gac_"
+    } else {
+        "gaa_"
+    };
+    shown_token(&html, prefix)
+}
+
+pub async fn status_and_body(response: Response<Body>) -> (StatusCode, String) {
     let status = response.status();
     (status, body_text(response).await)
 }

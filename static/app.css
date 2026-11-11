@@ -754,6 +754,29 @@ a.plain {
   border-radius: var(--radius-sm);
 }
 
+.choice-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.choice-group legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.token-created {
+  margin-bottom: 1rem;
+  border-color: var(--ok);
+}
+
+.token-access {
+  min-width: 10rem;
+  overflow-wrap: anywhere;
+}
+
 .path-crumbs {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;

@@ -22,6 +22,7 @@ pub mod settings_notify;
 pub mod settings_page;
 pub mod settings_transfer;
 pub mod sources;
+pub mod tokens;
 pub mod wiki;
 
 use std::io;
@@ -167,6 +168,8 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/backup", post(settings_backup::save))
         .route("/settings/backup/test", post(settings_backup::test))
         .route("/settings/backup/run", post(settings_backup::run))
+        .route("/settings/tokens", get(tokens::show).post(tokens::create))
+        .route("/settings/tokens/{id}/revoke", post(tokens::revoke))
         .route("/export.json", get(settings_transfer::export))
         .route(
             "/import",

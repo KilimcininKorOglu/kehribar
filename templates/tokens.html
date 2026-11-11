@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("tokens.title") }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ layout.t("tokens.title") }}</h1>
+    <p class="muted">{{ layout.t("tokens.intro") }}</p>
+  </div>
+</div>
+{% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
+{% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+
+{% if let Some(created) = created %}
+<section class="card token-created" role="status">
+  <h2>{{ layout.tf("tokens.created", [("name", created.name.as_str())]) }}</h2>
+  <p>{{ layout.t("tokens.copy_now") }}</p>
+  <pre class="clone-command"><code>{{ created.token }}</code></pre>
+  {% if is_clone(created.kind) %}
+  <p class="muted small">{{ layout.t("tokens.clone_usage") }}</p>
+  <pre class="clone-command"><code>git clone {{ site }}/git/&lt;host&gt;/&lt;owner&gt;/&lt;name&gt;.git</code></pre>
+  {% else %}
+  <p class="muted small">{{ layout.t("tokens.api_usage") }}</p>
+  <pre class="clone-command"><code>curl -H "Authorization: Bearer {{ created.token }}" {{ site }}/api/v1/repos</code></pre>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if rows.is_empty() %}
+<section class="card">
+  <p class="muted">{{ layout.t("tokens.empty") }}</p>
+</section>
+{% else %}
+<section class="card table-card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("tokens.col_name") }}</th>
+        <th scope="col">{{ layout.t("tokens.col_kind") }}</th>
+        <th scope="col">{{ layout.t("tokens.col_access") }}</th>
+        <th scope="col">{{ layout.t("tokens.col_created") }}</th>
+        <th scope="col">{{ layout.t("tokens.col_used") }}</th>
+        <th scope="col">{{ layout.t("tokens.col_expires") }}</th>
+        <th scope="col"><span class="visually-hidden">{{ layout.t("tokens.col_actions") }}</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><strong>{{ row.token.name }}</strong></td>
+        <td>{% if is_clone(row.token.kind) %}{{ layout.t("tokens.kind_clone") }}{% else %}{{ layout.t("tokens.kind_api") }}{% endif %}</td>
+        <td class="token-access">{{ access_text(row) }}</td>
+        <td><time title="{{ layout.absolute(row.token.created_at) }}">{{ layout.ago(row.token.created_at) }}</time></td>
+        <td>{% if let Some(ts) = row.token.last_used_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}<span class="muted">{{ layout.t("tokens.never_used") }}</span>{% endif %}</td>
+        <td>
+          {% if let Some(ts) = row.token.expires_at %}
+          {% if is_expired(row.token) %}<span class="badge badge-error">{{ layout.t("tokens.expired") }}</span>{% else %}<time title="{{ layout.absolute(ts) }}">{{ layout.absolute(ts) }}</time>{% endif %}
+          {% else %}<span class="muted">{{ layout.t("tokens.no_expiry") }}</span>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="/settings/tokens/{{ row.token.id }}/revoke">
+            <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+            <button class="btn btn-danger btn-small" type="submit">{{ layout.t("tokens.revoke") }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="card form-card">
+  <h2>{{ layout.t("tokens.new_clone") }}</h2>
+  <p class="muted">{{ layout.t("tokens.clone_intro") }}</p>
+  <form method="post" action="/settings/tokens" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <input type="hidden" name="kind" value="clone">
+    <label class="field">
+      <span>{{ layout.t("tokens.name") }}</span>
+      <input name="name" required maxlength="100" autocomplete="off">
+      <small class="muted">{{ layout.t("tokens.name_help") }}</small>
+    </label>
+    <fieldset class="choice-group stack">
+      <legend>{{ layout.t("tokens.scope") }}</legend>
+      <label class="check"><input type="radio" name="scope" value="all" checked><span>{{ layout.t("tokens.all_repos") }}</span></label>
+      <label class="check"><input type="radio" name="scope" value="selected"><span>{{ layout.t("tokens.selected_repos") }}</span></label>
+    </fieldset>
+    <label class="field">
+      <span>{{ layout.t("tokens.repos") }}</span>
+      <select name="repo" multiple size="8">
+        {% for repo in repos %}
+        <option value="{{ repo.id }}">{{ repo.host }}/{{ repo.owner }}/{{ repo.name }}</option>
+        {% endfor %}
+      </select>
+      <small class="muted">{{ layout.t("tokens.repos_help") }}</small>
+    </label>
+    {% include "token_expiry.html" %}
+    <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("tokens.create") }}</button></div>
+  </form>
+</section>
+
+<section class="card form-card">
+  <h2>{{ layout.t("tokens.new_api") }}</h2>
+  <p class="muted">{{ layout.t("tokens.api_intro") }}</p>
+  <form method="post" action="/settings/tokens" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <input type="hidden" name="kind" value="api">
+    <label class="field">
+      <span>{{ layout.t("tokens.name") }}</span>
+      <input name="name" required maxlength="100" autocomplete="off">
+      <small class="muted">{{ layout.t("tokens.name_help") }}</small>
+    </label>
+    <fieldset class="choice-group stack">
+      <legend>{{ layout.t("tokens.permission") }}</legend>
+      <label class="check"><input type="radio" name="permission" value="read" checked><span>{{ layout.t("tokens.read_only") }}</span></label>
+      <label class="check"><input type="radio" name="permission" value="write"><span>{{ layout.t("tokens.read_write") }}</span></label>
+    </fieldset>
+    {% include "token_expiry.html" %}
+    <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("tokens.create") }}</button></div>
+  </form>
+</section>
+{% endblock %}
