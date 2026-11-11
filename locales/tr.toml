@@ -122,6 +122,7 @@ help = "Bir revizyondaki metin dosyalarında arar. Revizyon boşsa varsayılan b
 too_short = "En az {n} karakter yazın."
 unknown_rev = "Arşivde bu adla bir commit yok."
 bad_regex = "Düzenli ifade geçersiz."
+nul_byte = "Arama metni NUL karakteri içeremez."
 timeout = "Arama çok uzun sürdüğü için durduruldu. Aramayı daraltıp yeniden deneyin."
 none = "Eşleşen satır yok."
 summary = "{files} içinde {matches}."

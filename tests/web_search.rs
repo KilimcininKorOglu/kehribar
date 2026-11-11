@@ -121,6 +121,14 @@ async fn option_like_queries_and_bad_input_are_safe() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(html.contains("Düzenli ifade geçersiz."), "{html}");
 
+    // git takes no NUL byte in an argument: a client error, not a crash.
+    let (status, html) = page(&t, "/repos/1/search?q=hel%00lo").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{html}");
+    assert!(
+        html.contains("Arama metni NUL karakteri içeremez."),
+        "{html}"
+    );
+
     // A one-character query does not run.
     let (status, html) = page(&t, "/repos/1/search?q=h").await;
     assert_eq!(status, StatusCode::OK);

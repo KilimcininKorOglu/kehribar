@@ -394,6 +394,25 @@ async fn unsafe_or_unknown_input_is_not_found() {
 }
 
 #[tokio::test]
+async fn a_nul_byte_in_the_input_is_never_a_server_error() {
+    let (t, _) = archived().await;
+    // git takes no NUL byte in an argument.
+    let search = t.get("/repos/1/commits?q=gu%00ide").await.status();
+    assert_eq!(search, StatusCode::BAD_REQUEST);
+    for uri in [
+        "/repos/1/tree?path=docs%00x",
+        "/repos/1/blob?path=main.rs%00x",
+        "/repos/1/blame?path=main.rs%00x",
+        "/repos/1/raw?path=main.rs%00x",
+        "/repos/1/tree?ref=main%00x",
+        "/repos/1/history?path=main.rs%00x",
+    ] {
+        let status = t.get(uri).await.status();
+        assert!(!status.is_server_error(), "{uri}: {status}");
+    }
+}
+
+#[tokio::test]
 async fn a_repository_without_archive_shows_an_empty_state() {
     let t = TestApp::new().await;
     t.post("/repos", "url=https%3A%2F%2Fgithub.com%2Fa%2Fb")

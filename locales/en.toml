@@ -124,6 +124,7 @@ help = "Searches the text files of one revision, the default branch when the rev
 too_short = "Type at least {n} characters."
 unknown_rev = "The archive has no commit with this revision name."
 bad_regex = "The regular expression is not valid."
+nul_byte = "The search text cannot hold a NUL character."
 timeout = "The search took too long and was stopped. Try a more specific text."
 none = "No line matches."
 summary = "{matches} in {files}."

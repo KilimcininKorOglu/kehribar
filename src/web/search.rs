@@ -138,7 +138,11 @@ pub async fn show(
         problem: None,
         repo,
     };
-    let status = if page.query.trim().chars().count() >= MIN_QUERY_CHARS {
+    // git takes no NUL byte in an argument.
+    let status = if page.query.contains('\0') {
+        page.problem = Some("search.nul_byte");
+        StatusCode::BAD_REQUEST
+    } else if page.query.trim().chars().count() >= MIN_QUERY_CHARS {
         search(&ctx, &mut page).await?
     } else {
         StatusCode::OK

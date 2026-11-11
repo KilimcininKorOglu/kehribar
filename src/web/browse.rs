@@ -852,6 +852,12 @@ pub async fn commits(
         .map(str::trim)
         .unwrap_or_default()
         .to_owned();
+    // git takes no NUL byte in an argument.
+    if search.contains('\0') {
+        return Err(AppError::BadRequest(String::from(
+            "the search text cannot hold a NUL character",
+        )));
+    }
     let page = query.page.unwrap_or(1).clamp(1, 100_000);
     let mut commits = match view.commit.as_deref() {
         Some(commit) => {
