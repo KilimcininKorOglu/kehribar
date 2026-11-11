@@ -124,32 +124,43 @@ struct Fetched {
 
 impl Fetched {
     fn report(self, default_branch: Option<String>, exclude: &[String]) -> SyncReport {
+        let Self {
+            changes,
+            set_aside,
+            after,
+            mut source,
+        } = self;
         let tracked = |refs: BTreeMap<String, String>| -> BTreeMap<String, String> {
             refs.into_iter()
                 .filter(|(name, _)| is_tracked(name, exclude))
                 .collect()
         };
-        let rewritten = self
-            .changes
+        // The source was listed before the fetch: a ref the fetch brought
+        // that the list lacks was pushed in between, so the source has it.
+        for change in &changes {
+            source
+                .entry(change.name.clone())
+                .or_insert_with(|| change.new.clone());
+        }
+        let rewritten = changes
             .iter()
             .filter(|c| c.kind == ChangeKind::Rewritten)
             .count();
         // A ref set aside left the archive's branches and tags with this
         // fetch; listing it here lets the history mark it as deleted at the
         // source.
-        let mut archive_refs = tracked(self.after);
-        archive_refs.extend(tracked(self.set_aside.clone()));
+        let mut archive_refs = tracked(after);
+        archive_refs.extend(tracked(set_aside.clone()));
         SyncReport {
-            refs_changed: self.changes.len() as u64,
-            refs_rescued: (rewritten + self.set_aside.len()) as u64,
+            refs_changed: changes.len() as u64,
+            refs_rescued: (rewritten + set_aside.len()) as u64,
             default_branch,
-            changes: self
-                .changes
+            changes: changes
                 .into_iter()
                 .filter(|c| is_tracked(&c.name, exclude))
                 .collect(),
             archive_refs,
-            source_refs: tracked(self.source),
+            source_refs: tracked(source),
         }
     }
 }
@@ -602,6 +613,32 @@ mod tests {
             wiki_url("https://bitbucket.org/a/b", true),
             "https://bitbucket.org/a/b.git/wiki"
         );
+    }
+
+    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_ref_pushed_during_the_fetch_counts_as_at_the_source() {
+        // ls-remote listed only main; the fetch also brought a new branch.
+        let fetched = Fetched {
+            changes: vec![RefChange {
+                name: "refs/heads/new".into(),
+                old: None,
+                new: "2".into(),
+                kind: ChangeKind::Created,
+            }],
+            set_aside: BTreeMap::new(),
+            after: map(&[("refs/heads/main", "1"), ("refs/heads/new", "2")]),
+            source: map(&[("refs/heads/main", "1")]),
+        };
+        let report = fetched.report(None, &[]);
+        assert_eq!(report.missing_at_source().count(), 0);
+        assert_eq!(report.source_refs["refs/heads/new"], "2");
     }
 
     #[test]
