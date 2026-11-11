@@ -335,6 +335,26 @@ pub async fn defer(
     Ok(())
 }
 
+/// Frees a repository whose sync stopped before it recorded its result: it
+/// gets back the status it had before and syncs again at `next_sync_at`. A
+/// repository that is no longer syncing is left as it is.
+pub async fn release(
+    pool: &SqlitePool,
+    id: i64,
+    status: RepoStatus,
+    next_sync_at: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE repos SET status = ?, next_sync_at = ? WHERE id = ? AND status = 'syncing'",
+    )
+    .bind(status)
+    .bind(next_sync_at)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Records an integrity check; `error` is `None` when it passed.
 pub async fn record_fsck(
     pool: &SqlitePool,

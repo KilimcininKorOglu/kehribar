@@ -115,6 +115,20 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     sync_runs::finish(&ctx.pool, run_id, &run).await
 }
 
+/// Frees a repository whose sync stopped with `message` before it recorded
+/// its result, so that the scheduler starts it again after its interval.
+pub async fn release(ctx: &SyncContext, repo: &Repo, settings: SyncSettings, message: &str) {
+    let now = unix_now();
+    let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
+    tracing::error!(repo = %repo.url, %message, "sync stopped without its result");
+    if let Err(err) = repos::release(&ctx.pool, repo.id, repo.status, now + interval * 60).await {
+        tracing::error!(repo = %repo.url, %err, "cannot free the repository of the stopped sync");
+    }
+    if let Err(err) = sync_runs::abandon(&ctx.pool, repo.id, now, message).await {
+        tracing::error!(repo = %repo.url, %err, "cannot end the run of the stopped sync");
+    }
+}
+
 /// Records a sync that a rate limit stopped: the repository keeps its state
 /// and tries again after [`RATE_LIMIT_WAIT_SECONDS`], without a notification;
 /// git does not pass on the server's own retry time.

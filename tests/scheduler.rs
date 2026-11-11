@@ -240,6 +240,36 @@ async fn a_rate_limited_fetch_is_postponed_and_keeps_the_state() {
 }
 
 #[tokio::test]
+async fn a_sync_that_cannot_record_its_result_frees_the_repository() {
+    let s = setup().await;
+    let source = common::source_repo(s.dir.path(), "project");
+    let id = add_repo(&s.ctx.pool, &source, "project", Some(30)).await;
+    // The database refuses the result of the sync.
+    sqlx::query(
+        "CREATE TRIGGER refuse_result BEFORE UPDATE OF size_bytes ON repos \
+         BEGIN SELECT RAISE(ABORT, 'database is locked'); END",
+    )
+    .execute(&s.ctx.pool)
+    .await
+    .unwrap();
+
+    let before = unix_now();
+    assert_eq!(run_tick(&s.scheduler).await, 1);
+
+    let repo = repos::get(&s.ctx.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Pending);
+    assert!(
+        repo.next_sync_at >= before + 30 * 60 && repo.next_sync_at <= unix_now() + 30 * 60,
+        "{}",
+        repo.next_sync_at
+    );
+    let runs = sync_runs::list_for_repo(&s.ctx.pool, id, 10).await.unwrap();
+    assert_eq!(runs[0].outcome, Some(RunOutcome::Error));
+    let message = runs[0].message.clone().unwrap();
+    assert!(message.contains("database is locked"), "{message}");
+}
+
+#[tokio::test]
 async fn claimed_repository_is_not_started_twice() {
     let s = setup().await;
     let source = common::source_repo(s.dir.path(), "project");

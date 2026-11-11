@@ -86,6 +86,21 @@ pub async fn finish(pool: &SqlitePool, id: i64, result: &RunResult<'_>) -> sqlx:
     Ok(())
 }
 
+/// Ends every unfinished run of the repository as an error with `message`,
+/// for a sync that stopped before it recorded its result.
+pub async fn abandon(pool: &SqlitePool, repo_id: i64, now: i64, message: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE sync_runs SET finished_at = ?, outcome = 'error', message = ? \
+         WHERE repo_id = ? AND finished_at IS NULL",
+    )
+    .bind(now)
+    .bind(message)
+    .bind(repo_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Newest runs first.
 pub async fn list_for_repo(
     pool: &SqlitePool,

@@ -185,9 +185,18 @@ impl Scheduler {
         let ctx = self.ctx.clone();
         tokio::spawn(async move {
             let _guard = guard;
-            if let Err(err) = worker::run(&ctx, &repo, settings).await {
-                tracing::error!(repo = %repo.url, %err, "cannot record sync result");
-            }
+            // Its own task, so that a panic ends there and the repository
+            // can still be freed here.
+            let work = tokio::spawn({
+                let (ctx, repo) = (ctx.clone(), repo.clone());
+                async move { worker::run(&ctx, &repo, settings).await }
+            });
+            let message = match work.await {
+                Ok(Ok(())) => return,
+                Ok(Err(err)) => format!("cannot record the sync result: {err}"),
+                Err(err) => format!("the sync stopped: {err}"),
+            };
+            worker::release(&ctx, &repo, settings, &message).await;
         })
     }
 
