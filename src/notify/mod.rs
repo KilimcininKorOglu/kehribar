@@ -153,6 +153,10 @@ pub async fn deliver(ctx: &SyncContext, event: &Event<'_>) -> Result<(), String>
     let errors = [
         send_webhook(&client, &channels, event, &text, link.clone()).await,
         send_telegram(&client, &channels, &text, link.as_deref()).await,
+        channels
+            .telegram_error
+            .as_ref()
+            .map(|err| format!("Telegram: {err}")),
     ];
     let errors: Vec<String> = errors.into_iter().flatten().collect();
     if errors.is_empty() {

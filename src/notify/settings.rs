@@ -30,12 +30,15 @@ pub struct Saved {
 pub struct Channels {
     pub webhook_url: Option<String>,
     pub telegram: Option<Telegram>,
+    /// Why the saved Telegram token cannot be used; the other channels
+    /// still work.
+    pub telegram_error: Option<String>,
     pub lang: Lang,
 }
 
 impl Channels {
     pub fn is_empty(&self) -> bool {
-        self.webhook_url.is_none() && self.telegram.is_none()
+        self.webhook_url.is_none() && self.telegram.is_none() && self.telegram_error.is_none()
     }
 }
 
@@ -89,7 +92,9 @@ pub async fn save(
 }
 
 /// The channels in force: saved values first, then the environment.
-/// Telegram is on only when both the token and the chat are known.
+/// Telegram is on only when both the token and the chat are known. A saved
+/// token that cannot be decrypted turns Telegram off and is reported in
+/// `telegram_error`; the webhook still applies.
 pub async fn effective(
     pool: &SqlitePool,
     config: &Config,
@@ -97,9 +102,10 @@ pub async fn effective(
 ) -> Result<Channels, String> {
     let env = &config.notify;
     let saved = saved(pool).await.map_err(|err| err.to_string())?;
-    let token = match store::get_secret(pool, cipher, KEY_TELEGRAM_TOKEN).await? {
-        Some(token) => Some(token),
-        None => env.telegram_bot_token.clone(),
+    let (token, telegram_error) = match store::get_secret(pool, cipher, KEY_TELEGRAM_TOKEN).await {
+        Ok(Some(token)) => (Some(token), None),
+        Ok(None) => (env.telegram_bot_token.clone(), None),
+        Err(err) => (None, Some(err)),
     };
     let chat_id = saved
         .telegram_chat_id
@@ -112,6 +118,7 @@ pub async fn effective(
     Ok(Channels {
         webhook_url: saved.webhook_url.or_else(|| env.webhook_url.clone()),
         telegram,
+        telegram_error,
         lang: saved.lang.unwrap_or(env.lang),
     })
 }
@@ -204,6 +211,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(saved(&pool).await.unwrap(), Saved::default());
+    }
+
+    #[tokio::test]
+    async fn a_token_that_cannot_be_decrypted_keeps_the_webhook() {
+        let pool = open_in_memory().await.unwrap();
+        let config = config();
+        // The token was saved under another secret key.
+        let other = Cipher::new(&[7u8; 32]);
+        let token = TokenChange::Set(other.encrypt("123:secret").unwrap());
+        save(&pool, None, None, None, &token).await.unwrap();
+
+        let cipher = Cipher::new(&config.secret_key);
+        let channels = effective(&pool, &config, &cipher).await.unwrap();
+        assert_eq!(
+            channels.webhook_url.as_deref(),
+            Some("https://env.example/hook")
+        );
+        assert!(channels.telegram.is_none());
+        assert!(channels.telegram_error.is_some());
+        assert!(!channels.is_empty());
     }
 
     #[tokio::test]

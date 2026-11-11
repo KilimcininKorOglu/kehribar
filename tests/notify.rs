@@ -164,6 +164,33 @@ async fn telegram_gets_the_text_and_errors_never_show_the_token() {
 }
 
 #[tokio::test]
+async fn a_token_saved_under_another_key_does_not_stop_the_webhook() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/hook"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = common::test_config(dir.path());
+    config.notify.webhook_url = Some(format!("{}/hook", server.uri()));
+    config.notify.telegram_chat_id = Some("42".into());
+    let ctx = context(config, db::open_in_memory().await.unwrap());
+    // The secret key changed after the token was saved.
+    let old_key = Cipher::new(&[7u8; 32]);
+    let token = notify::settings::TokenChange::Set(old_key.encrypt("123:secret").unwrap());
+    notify::settings::save(&ctx.pool, None, None, None, &token)
+        .await
+        .unwrap();
+
+    let err = notify::deliver(&ctx, &Event::Test).await.unwrap_err();
+    assert!(err.starts_with("Telegram: "), "{err}");
+    assert!(!err.contains("secret"), "{err}");
+    assert_eq!(webhook_bodies(&server).await.len(), 1);
+}
+
+#[tokio::test]
 async fn settings_page_saves_and_tests_the_channels() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
