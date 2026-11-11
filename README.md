@@ -21,7 +21,13 @@ Pull requests and issues are not archived. Git LFS objects are archived only for
 - Fetching over SSH with a generated or pasted key per host, and a stored host key that a fetch checks every time.
 - Git LFS per repository: the objects are archived, shown in the file view and in downloads, and backed up.
 - External images of Markdown files are archived and shown from the archive, with SSRF protection.
-- Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README, blame, raw files.
+- Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README and Markdown files, blame, raw files.
+- Ref history: every branch and tag change of each sync (created, moved, rewritten, deleted at the source, back at the source), the details of each sync run, a "deleted at source" mark on the branches and tags page, and a timeline that shows where each ref pointed on a chosen date.
+- Compare two branches, tags or commits: the commits of the second that the first lacks (at most 250) and their combined diff.
+- Code search in one repository with `git grep`: fixed text or a regular expression, with or without case, in any revision; at most 500 matching lines.
+- Wiki browsing: Markdown, AsciiDoc and reStructuredText pages are rendered, other formats are shown as text.
+- The repository list filters by status, sorts by name, size, last sync or status, and pages by 50.
+- A disk page: the archive size, the LFS share, the 20 largest repositories and the growth of the last 90 days.
 - Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
 - Ref exclude patterns per host and per repository, for example `refs/pull/*`.
 - Scheduled integrity checks (`git fsck`) and disk maintenance (`git repack`) of every archive.
