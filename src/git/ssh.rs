@@ -227,9 +227,26 @@ pub async fn forget(known_hosts: &Path, host: &str) -> Result<usize, SshError> {
     // A rename replaces the file in one step, so a fetch that reads it at
     // the same time sees the old or the new list, never half of one.
     let next = known_hosts.with_extension(format!("new-{}", random_name()?));
-    tokio::fs::write(&next, kept).await?;
-    tokio::fs::rename(&next, known_hosts).await?;
+    replace_with(&next, known_hosts, kept.as_bytes()).await?;
     Ok(removed)
+}
+
+/// Writes `data` to `next` and renames it to `target`. On failure `next`
+/// is removed, so no copy of the list stays beside the file.
+async fn replace_with(next: &Path, target: &Path, data: &[u8]) -> std::io::Result<()> {
+    let written = match tokio::fs::write(next, data).await {
+        Ok(()) => tokio::fs::rename(next, target).await,
+        Err(err) => Err(err),
+    };
+    let Err(err) = written else {
+        return Ok(());
+    };
+    if let Err(remove) = tokio::fs::remove_file(next).await
+        && remove.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(file = %next.display(), error = %remove, "cannot remove a temporary file");
+    }
+    Err(err)
 }
 
 #[cfg(test)]
@@ -285,6 +302,18 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, ["bundle-1.bundle"]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_replace_leaves_no_temporary_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        // A non-empty directory under the target name makes the rename fail.
+        let target = dir.path().join("known_hosts");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("x"), "").unwrap();
+        let next = dir.path().join("known_hosts.new-1");
+        assert!(replace_with(&next, &target, b"line\n").await.is_err());
+        assert!(!next.exists());
     }
 
     #[test]
