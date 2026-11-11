@@ -20,6 +20,7 @@ use git_archive::db::{self, unix_now};
 use git_archive::i18n::Catalog;
 use git_archive::sync::SyncContext;
 use git_archive::sync::scheduler::Scheduler;
+use sha2::Digest;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -265,6 +266,61 @@ async fn a_bundle_is_uploaded_once_per_change_and_old_bundles_are_pruned() {
     // No temporary bundle stays behind.
     let tmp = ctx.config.data_dir.join("tmp");
     assert_eq!(std::fs::read_dir(tmp).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn lfs_objects_are_uploaded_once_beside_the_bundles() {
+    let (server, s3) = FakeS3::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = backup_config(&dir.path().join("data"), &server.uri());
+    let ctx = context(config, db::open_in_memory().await.unwrap());
+    let content = b"large binary \x00 content".repeat(100);
+    let source = common::lfs_source_repo(dir.path(), "project", &content);
+    let id = archived_repo(&ctx, &source).await;
+    let lfs_keys = || s3.keys(&format!("{FOLDER}lfs/"));
+
+    // LFS off: only the bundle goes up.
+    let run = backup::run(&ctx, PART_SIZE).await.unwrap().unwrap();
+    assert_eq!((run.uploaded, run.error.as_deref()), (1, None));
+    assert!(lfs_keys().is_empty());
+
+    // LFS turned on without a ref change: the objects catch up.
+    let settings = repos::RepoSettings {
+        interval_minutes: None,
+        wiki_enabled: false,
+        ref_exclude: None,
+        lfs_enabled: true,
+    };
+    repos::update_settings(&ctx.pool, id, settings)
+        .await
+        .unwrap();
+    sync(&ctx, id).await;
+    let run = backup::run(&ctx, PART_SIZE).await.unwrap().unwrap();
+    assert_eq!((run.uploaded, run.error.as_deref()), (1, None));
+    let keys = lfs_keys();
+    assert_eq!(keys.len(), 1, "{keys:?}");
+    assert_eq!(s3.object(&keys[0]), content);
+    // The key is the SHA-256 of the content, as Git LFS names it.
+    let oid: String = sha2::Sha256::digest(&content)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(keys[0], format!("{FOLDER}lfs/{oid}"));
+
+    // A stored object is never uploaded again, and pruning keeps it.
+    commit_file(&source, "second.txt", b"second\n");
+    sync(&ctx, id).await;
+    let run = backup::run(&ctx, PART_SIZE).await.unwrap().unwrap();
+    assert_eq!((run.uploaded, run.error.as_deref()), (1, None));
+    assert_eq!(lfs_keys(), keys);
+    let puts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT" && r.url.path().contains("/lfs/"))
+        .count();
+    assert_eq!(puts, 1);
 }
 
 #[tokio::test]

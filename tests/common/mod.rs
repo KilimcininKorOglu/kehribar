@@ -53,14 +53,32 @@ pub fn git_in(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-/// Creates a source repository with one commit on `main` under `parent`.
-pub fn source_repo(parent: &Path, name: &str) -> PathBuf {
+/// A new repository without commits at `parent/name`, on branch `main`.
+fn empty_repo(parent: &Path, name: &str) -> PathBuf {
     let path = parent.join(name);
     std::fs::create_dir_all(&path).unwrap();
     git_in(&path, &["init", "--quiet", "--initial-branch=main"]);
+    path
+}
+
+/// Creates a source repository with one commit on `main` under `parent`.
+pub fn source_repo(parent: &Path, name: &str) -> PathBuf {
+    let path = empty_repo(parent, name);
     std::fs::write(path.join("README.md"), "# Test\n").unwrap();
     git_in(&path, &["add", "README.md"]);
     git_in(&path, &["commit", "--quiet", "-m", "initial"]);
+    path
+}
+
+/// Creates a source repository under `parent` whose `data.bin` holds
+/// `content` in Git LFS, which `git lfs` keeps in the source's own store.
+pub fn lfs_source_repo(parent: &Path, name: &str, content: &[u8]) -> PathBuf {
+    let path = empty_repo(parent, name);
+    git_in(&path, &["lfs", "install", "--local"]);
+    git_in(&path, &["lfs", "track", "*.bin"]);
+    std::fs::write(path.join("data.bin"), content).unwrap();
+    git_in(&path, &["add", ".gitattributes", "data.bin"]);
+    git_in(&path, &["commit", "--quiet", "-m", "large file"]);
     path
 }
 

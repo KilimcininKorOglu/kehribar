@@ -338,6 +338,7 @@ pub async fn sync_now(
 #[derive(Debug, Deserialize)]
 pub struct RepoSettingsForm {
     wiki: Option<String>,
+    lfs: Option<String>,
     interval: Option<String>,
     ref_exclude: Option<String>,
 }
@@ -372,6 +373,7 @@ pub async fn update(
         interval_minutes: interval,
         wiki_enabled: is_checked(form.wiki.as_deref()),
         ref_exclude: ref_exclude.as_deref(),
+        lfs_enabled: is_checked(form.lfs.as_deref()),
     };
     repos::update_settings(&ctx.state.pool, id, settings).await?;
     Ok(Redirect::to(&format!("/repos/{id}?notice=saved")).into_response())

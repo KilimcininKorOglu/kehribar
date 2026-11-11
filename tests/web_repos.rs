@@ -126,6 +126,7 @@ async fn detail_page_sync_now_and_repository_settings() {
             next_sync_at: unix_now() + 3600,
             error: None,
             size_bytes: 2048,
+            lfs_size_bytes: 0,
             default_branch: Some("main"),
             has_wiki: false,
         },

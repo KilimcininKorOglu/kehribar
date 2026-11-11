@@ -3,11 +3,13 @@
 //!
 //! Keys: `<prefix>/<host>/<owner>/<name>/<unix time>.bundle`, and
 //! `<prefix>/<host>/<owner>/<name>.wiki/<unix time>.bundle` for the wiki.
-//! `git clone --mirror <file>.bundle` restores a repository.
+//! `git clone --mirror <file>.bundle` restores a repository. With LFS on,
+//! every LFS object goes to `<prefix>/<host>/<owner>/<name>/lfs/<oid>` once.
 
 pub mod s3;
 pub mod settings;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -15,8 +17,7 @@ use sha2::{Digest, Sha256};
 
 use crate::db::repos::{self, Repo};
 use crate::db::{backups, unix_now};
-use crate::git::Git;
-use crate::git::mirror;
+use crate::git::{Git, lfs, mirror};
 use crate::notify::{self, Change, Event};
 use crate::sync::SyncContext;
 use s3::Store;
@@ -157,9 +158,46 @@ impl Drop for TempFiles {
 }
 
 impl Job<'_> {
-    /// Uploads the repository when its refs changed since the last upload.
-    /// Returns whether it uploaded.
+    /// Uploads the bundles of the repository when its refs changed since the
+    /// last upload, and its LFS objects the storage does not have yet.
+    /// Returns whether it uploaded anything.
     async fn back_up(&self, repo: &Repo) -> Result<bool, String> {
+        let bundled = self.back_up_refs(repo).await?;
+        // Checked on every run, so LFS turned on later, or an upload that
+        // failed before, catches up without a ref change.
+        let objects = if repo.lfs_enabled {
+            self.back_up_lfs(repo).await?
+        } else {
+            0
+        };
+        Ok(bundled || objects > 0)
+    }
+
+    /// Uploads every local LFS object missing under `<repo>/lfs/<oid>`. The
+    /// objects are named by their content, so a stored one never changes
+    /// and is never pruned. Returns the number of uploaded objects.
+    async fn back_up_lfs(&self, repo: &Repo) -> Result<usize, String> {
+        let dir = self.ctx.repo_dir(repo);
+        let local = lfs::local_objects(&dir)
+            .await
+            .map_err(|err| format!("cannot list the LFS objects: {err}"))?;
+        if local.is_empty() {
+            return Ok(0);
+        }
+        let prefix = self.store.key(&format!("{}/lfs/", repo.full_name()));
+        let stored: HashSet<String> = self.store.list(&prefix).await?.into_iter().collect();
+        let mut uploaded = 0;
+        for (oid, file) in local {
+            let key = format!("{prefix}{oid}");
+            if !stored.contains(&key) {
+                self.store.put_file(&key, &file).await?;
+                uploaded += 1;
+            }
+        }
+        Ok(uploaded)
+    }
+
+    async fn back_up_refs(&self, repo: &Repo) -> Result<bool, String> {
         let now = unix_now();
         let (hash, bundles) = {
             // A sync must not repack while the bundles are written.

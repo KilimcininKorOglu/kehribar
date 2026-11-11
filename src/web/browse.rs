@@ -13,6 +13,7 @@ use axum::extract::{Path, Query};
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
+use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
 use url::form_urlencoded;
 
@@ -22,11 +23,11 @@ use super::pages::{Layout, Nav, render};
 use super::repos::PageContext;
 use crate::db::repos::{self, Repo};
 use crate::error::AppError;
-use crate::git::Git;
 use crate::git::read::{
     self, Blame, BlameChunk, CommitDetail, CommitSummary, EntryKind, FileChange, FileDiff,
     RefEntry, RefKind, TreeEntry,
 };
+use crate::git::{Git, lfs};
 use crate::repo_url;
 
 /// Commits on one page of the history.
@@ -410,20 +411,9 @@ pub async fn blob(
         Ok(found) => found,
         Err(redirect) => return Ok(redirect),
     };
-    let commit = commit_of(&view)?;
-    let blob = read::blob(&view.git, &view.dir, commit, &path, read::MAX_BLOB_BYTES).await?;
+    let blob = file_blob(&repo, &view, &path).await?;
     let is_image = image_type(&path).is_some();
-    let (code, line_count) = if blob.too_large || blob.is_binary() {
-        (None, 0)
-    } else {
-        let text = String::from_utf8_lossy(&blob.data).into_owned();
-        let lines = text.lines().count().max(1);
-        let name = path.clone();
-        let html = tokio::task::spawn_blocking(move || highlight::to_html(&name, &text))
-            .await
-            .map_err(AppError::internal)?;
-        (Some(html), lines)
-    };
+    let (code, line_count) = highlighted(&blob, &path).await?;
     let page = BlobPage {
         layout: ctx.layout(Nav::Repos),
         repo,
@@ -439,6 +429,109 @@ pub async fn blob(
     Ok(render(&page)?.into_response())
 }
 
+/// The file at `path` for the file view; an LFS file gives its object.
+async fn file_blob(repo: &Repo, view: &RepoView, path: &str) -> Result<read::Blob, AppError> {
+    let commit = commit_of(view)?;
+    let blob = read::blob(&view.git, &view.dir, commit, path, read::MAX_BLOB_BYTES).await?;
+    match lfs_object(repo, view, &blob.data).await? {
+        Some((file, size)) => lfs_blob(&file, size, read::MAX_BLOB_BYTES).await,
+        None => Ok(blob),
+    }
+}
+
+/// The highlighted HTML of a text file and its line count; nothing for a
+/// binary file or one too large to show.
+async fn highlighted(blob: &read::Blob, path: &str) -> Result<(Option<String>, usize), AppError> {
+    if blob.too_large || blob.is_binary() {
+        return Ok((None, 0));
+    }
+    let text = String::from_utf8_lossy(&blob.data).into_owned();
+    let lines = text.lines().count().max(1);
+    let name = path.to_owned();
+    let html = tokio::task::spawn_blocking(move || highlight::to_html(&name, &text))
+        .await
+        .map_err(AppError::internal)?;
+    Ok((Some(html), lines))
+}
+
+/// The LFS object a file stands for, with its size: when the repository
+/// fetches LFS files, `data` is a pointer file and the archive holds the
+/// object. Otherwise the file is shown as it is, pointer or not.
+async fn lfs_object(
+    repo: &Repo,
+    view: &RepoView,
+    data: &[u8],
+) -> Result<Option<(PathBuf, u64)>, AppError> {
+    if !repo.lfs_enabled {
+        return Ok(None);
+    }
+    let Some(pointer) = lfs::parse_pointer(data) else {
+        return Ok(None);
+    };
+    let file = lfs::local_object(&view.dir, &pointer)
+        .await
+        .map_err(AppError::internal)?;
+    Ok(file.map(|file| (file, pointer.size)))
+}
+
+/// The first `limit` bytes of `file`.
+async fn read_head(file: &std::path::Path, limit: usize) -> Result<Vec<u8>, AppError> {
+    let opened = tokio::fs::File::open(file)
+        .await
+        .map_err(AppError::internal)?;
+    let mut data = Vec::new();
+    opened
+        .take(u64::try_from(limit).unwrap_or(u64::MAX))
+        .read_to_end(&mut data)
+        .await
+        .map_err(AppError::internal)?;
+    Ok(data)
+}
+
+/// An LFS object as a [`read::Blob`] of at most `limit` bytes.
+async fn lfs_blob(file: &std::path::Path, size: u64, limit: usize) -> Result<read::Blob, AppError> {
+    let size = usize::try_from(size).unwrap_or(usize::MAX);
+    if size > limit {
+        return Ok(read::Blob {
+            size,
+            data: Vec::new(),
+            too_large: true,
+        });
+    }
+    Ok(read::Blob {
+        size,
+        data: read_head(file, limit).await?,
+        too_large: false,
+    })
+}
+
+/// The streamed content of a file and its size with its first bytes, which
+/// decide between text and download. An LFS file streams its object.
+async fn raw_body(
+    repo: &Repo,
+    view: &RepoView,
+    path: &str,
+) -> Result<(Body, read::Blob), AppError> {
+    let commit = commit_of(view)?;
+    let head = read::peek(&view.git, &view.dir, commit, path, 8000).await?;
+    if let Some((file, size)) = lfs_object(repo, view, &head.data).await? {
+        let opened = tokio::fs::File::open(&file)
+            .await
+            .map_err(AppError::internal)?;
+        let head = read::Blob {
+            size: usize::try_from(size).unwrap_or(usize::MAX),
+            data: read_head(&file, 8000).await?,
+            too_large: false,
+        };
+        return Ok((Body::from_stream(ReaderStream::new(opened)), head));
+    }
+    let spec = format!("{commit}:{path}");
+    let stdout = view
+        .git
+        .spawn_stdout(&view.dir, &["cat-file", "blob", &spec])?;
+    Ok((Body::from_stream(ReaderStream::new(stdout)), head))
+}
+
 /// The file as it is, streamed. Images keep their type; any other file is
 /// plain text or a download, so archived HTML never runs as a page.
 pub async fn raw(
@@ -446,24 +539,18 @@ pub async fn raw(
     Path(id): Path<i64>,
     Query(query): Query<BrowseQuery>,
 ) -> Result<Response, AppError> {
-    let (_, view, path) = match file_view(&ctx, id, &query).await? {
+    let (repo, view, path) = match file_view(&ctx, id, &query).await? {
         Ok(found) => found,
         Err(redirect) => return Ok(redirect),
     };
-    let commit = commit_of(&view)?;
-    // The first bytes decide between text and download.
-    let head = read::peek(&view.git, &view.dir, commit, &path, 8000).await?;
-    let spec = format!("{commit}:{path}");
-    let stdout = view
-        .git
-        .spawn_stdout(&view.dir, &["cat-file", "blob", &spec])?;
+    let (body, head) = raw_body(&repo, &view, &path).await?;
     let name = path.rsplit('/').next().unwrap_or(&path);
     let content_type = image_type(&path).unwrap_or(if head.is_binary() {
         "application/octet-stream"
     } else {
         "text/plain; charset=utf-8"
     });
-    let mut response = Body::from_stream(ReaderStream::new(stdout)).into_response();
+    let mut response = body.into_response();
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert(
@@ -507,7 +594,13 @@ pub async fn archive(
     let label = archive_label(&repo.name, view.rev_label());
     let format_arg = format!("--format={format}");
     let prefix_arg = format!("--prefix={label}/");
-    let args = ["archive", format_arg.as_str(), prefix_arg.as_str(), commit];
+    // With LFS on, git-lfs writes the content of the objects into the file.
+    let mut args: Vec<&str> = if repo.lfs_enabled {
+        lfs::ARCHIVE_CONFIG.to_vec()
+    } else {
+        Vec::new()
+    };
+    args.extend(["archive", format_arg.as_str(), prefix_arg.as_str(), commit]);
     let stdout = view.git.spawn_stdout(&view.dir, &args)?;
     let mut response = Body::from_stream(ReaderStream::new(stdout)).into_response();
     let headers = response.headers_mut();

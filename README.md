@@ -19,6 +19,7 @@ Pull requests, issues and Git LFS objects are not archived.
 - A global sync interval, a per-repository interval and a "sync now" button.
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
 - Fetching over SSH with a generated or pasted key per host, and a stored host key that a fetch checks every time.
+- Git LFS per repository: the objects are archived, shown in the file view and in downloads, and backed up.
 - Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README, blame, raw files.
 - Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
 - Ref exclude patterns per host and per repository, for example `refs/pull/*`.
@@ -175,6 +176,21 @@ Each host can hold one SSH key. On the host page, generate a new ed25519 key or 
 The first connection to a server stores its host key in `/data/ssh/known_hosts`. When the server later shows another key, the fetch stops and the repository changes to "Error" with a message that names the host key. The host page lists the stored host keys of the host on every port. When a change is expected, for example after a server move, "Forget host keys" removes them and the next fetch stores the new key.
 
 A source with the "SSH URL" option adds its repositories with the SSH clone URL the provider names, under the same archive path as the HTTPS URL. The SSH URL must be on the server of the host or on its `ssh.` name, as Azure DevOps uses (`ssh.dev.azure.com`), because the SSH key of the host goes to that server. A repository without such a URL, for example a gist, is skipped and named in the scan result.
+
+## Git LFS
+
+"Fetch Git LFS files" in the settings of a repository makes every sync run `git lfs fetch --all origin` after the fetch, which downloads every LFS object that a branch or tag points to. The objects stay in `<name>.git/lfs/objects`. A failed LFS download marks the repository "Error"; the commits of that sync are archived all the same. The repository page shows how much of the archive size the LFS objects take.
+
+With LFS on, the file view, the raw file and the ZIP or tar.gz download give the real content of an LFS file. A file whose object the archive does not hold is shown as its pointer file; a download never fetches a missing object from the source. Without LFS, every LFS file shows as its pointer file. `git clone` from the archive serves the pointer files only.
+
+The backup uploads every LFS object once to `<prefix>/<host>/<owner>/<name>/lfs/<oid>`, next to the bundles. Objects are named by their SHA-256 and are never pruned. To restore a repository with its LFS files, clone the bundle and copy each object to `lfs/objects/<first two characters>/<next two characters>/<oid>` in the restored repository:
+
+```sh
+git clone --mirror name-1794336958.bundle name.git
+# for each downloaded object <oid>:
+mkdir -p name.git/lfs/objects/${oid:0:2}/${oid:2:2}
+cp <oid> name.git/lfs/objects/${oid:0:2}/${oid:2:2}/<oid>
+```
 
 ## Importing users and organizations
 

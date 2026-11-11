@@ -46,6 +46,10 @@ pub struct Repo {
     pub fsck_error: Option<String>,
     pub last_repack_at: Option<i64>,
     pub repack_saved_bytes: Option<i64>,
+    /// Syncs fetch the Git LFS objects too.
+    pub lfs_enabled: bool,
+    /// Bytes of the LFS objects in the archive, part of `size_bytes`.
+    pub lfs_size_bytes: i64,
 }
 
 impl Repo {
@@ -75,6 +79,7 @@ pub struct RepoSettings<'a> {
     pub wiki_enabled: bool,
     /// Normalized patterns, see [`crate::ref_filter::normalize`].
     pub ref_exclude: Option<&'a str>,
+    pub lfs_enabled: bool,
 }
 
 /// The state written when a sync finishes.
@@ -85,6 +90,7 @@ pub struct SyncOutcome<'a> {
     pub next_sync_at: i64,
     pub error: Option<&'a str>,
     pub size_bytes: i64,
+    pub lfs_size_bytes: i64,
     pub default_branch: Option<&'a str>,
     pub has_wiki: bool,
 }
@@ -96,8 +102,8 @@ macro_rules! select_repos {
             "SELECT id, url, host, owner, name, source_id, username, token_enc, \
              interval_minutes, wiki_enabled, status, last_sync_at, last_success_at, \
              next_sync_at, last_error, size_bytes, default_branch, has_wiki, created_at, \
-             ref_exclude, last_fsck_at, fsck_error, last_repack_at, repack_saved_bytes \
-             FROM repos ",
+             ref_exclude, last_fsck_at, fsck_error, last_repack_at, repack_saved_bytes, \
+             lfs_enabled, lfs_size_bytes FROM repos ",
             $tail
         )
     };
@@ -190,7 +196,8 @@ pub async fn finish(pool: &SqlitePool, id: i64, outcome: &SyncOutcome<'_>) -> sq
         "UPDATE repos SET status = ?1, \
          last_success_at = CASE WHEN ?1 = 'ok' THEN ?2 ELSE last_success_at END, \
          next_sync_at = ?3, last_error = ?4, size_bytes = ?5, \
-         default_branch = COALESCE(?6, default_branch), has_wiki = ?7 WHERE id = ?8",
+         default_branch = COALESCE(?6, default_branch), has_wiki = ?7, lfs_size_bytes = ?8 \
+         WHERE id = ?9",
     )
     .bind(outcome.status)
     .bind(outcome.finished_at)
@@ -199,6 +206,7 @@ pub async fn finish(pool: &SqlitePool, id: i64, outcome: &SyncOutcome<'_>) -> sq
     .bind(outcome.size_bytes)
     .bind(outcome.default_branch)
     .bind(outcome.has_wiki)
+    .bind(outcome.lfs_size_bytes)
     .bind(id)
     .execute(pool)
     .await?;
@@ -265,11 +273,13 @@ pub async fn update_settings(
     settings: RepoSettings<'_>,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query(
-        "UPDATE repos SET interval_minutes = ?, wiki_enabled = ?, ref_exclude = ? WHERE id = ?",
+        "UPDATE repos SET interval_minutes = ?, wiki_enabled = ?, ref_exclude = ?, \
+         lfs_enabled = ? WHERE id = ?",
     )
     .bind(settings.interval_minutes)
     .bind(settings.wiki_enabled)
     .bind(settings.ref_exclude)
+    .bind(settings.lfs_enabled)
     .bind(id)
     .execute(pool)
     .await?;
@@ -390,6 +400,7 @@ mod tests {
             next_sync_at: 210 + 3600,
             error: None,
             size_bytes: 4096,
+            lfs_size_bytes: 1024,
             default_branch: Some("main"),
             has_wiki: true,
         };
@@ -400,6 +411,7 @@ mod tests {
         assert_eq!(repo.last_success_at, Some(210));
         assert_eq!(repo.default_branch.as_deref(), Some("main"));
         assert!(repo.has_wiki);
+        assert_eq!(repo.lfs_size_bytes, 1024);
         assert!(claim(&pool, id, 300).await.unwrap());
     }
 
@@ -412,6 +424,7 @@ mod tests {
             next_sync_at: 20,
             error: None,
             size_bytes: 1,
+            lfs_size_bytes: 0,
             default_branch: Some("main"),
             has_wiki: false,
         };
@@ -422,6 +435,7 @@ mod tests {
             next_sync_at: 40,
             error: Some("repository not found"),
             size_bytes: 1,
+            lfs_size_bytes: 0,
             default_branch: None,
             has_wiki: false,
         };
@@ -461,12 +475,15 @@ mod tests {
             interval_minutes: Some(30),
             wiki_enabled: false,
             ref_exclude: Some("refs/pull/*"),
+            lfs_enabled: true,
         };
+        assert!(!get(&pool, id).await.unwrap().unwrap().lfs_enabled);
         assert!(update_settings(&pool, id, settings).await.unwrap());
         let stored = get(&pool, id).await.unwrap().unwrap();
         assert_eq!(stored.token_enc.as_deref(), Some(&b"old"[..]));
         assert_eq!(stored.interval_minutes, Some(30));
         assert!(!stored.wiki_enabled);
+        assert!(stored.lfs_enabled);
         assert_eq!(stored.ref_exclude.as_deref(), Some("refs/pull/*"));
 
         // A credential update without a token keeps the stored one.

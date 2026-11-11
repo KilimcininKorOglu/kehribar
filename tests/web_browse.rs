@@ -96,6 +96,133 @@ fn archive_dir(t: &TestApp) -> PathBuf {
     git_archive::repo_url::archive_dir(&t.state.config.data_dir, "local", "team", "project")
 }
 
+/// The bytes of `name` in a tar.gz archive, read with the system `tar`.
+fn tar_gz_member(dir: &Path, archive: &[u8], name: &str) -> Vec<u8> {
+    let file = dir.join("download.tar.gz");
+    std::fs::write(&file, archive).unwrap();
+    let output = std::process::Command::new("tar")
+        .args(["-xzOf", file.to_str().unwrap(), name])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+async fn body_bytes(response: axum::http::Response<axum::body::Body>) -> Vec<u8> {
+    axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec()
+}
+
+#[tokio::test]
+async fn lfs_files_show_their_content_only_with_lfs_on() {
+    let t = TestApp::new().await;
+    let content = "large text line\n".repeat(300);
+    let source = common::lfs_source_repo(t.dir.path(), "lfs-source", content.as_bytes());
+    let url = source.to_string_lossy();
+    let repo = NewRepo {
+        url: &url,
+        host: "local",
+        owner: "team",
+        name: "project",
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled: false,
+    };
+    repos::insert(&t.state.pool, &repo, unix_now())
+        .await
+        .unwrap();
+    sync(&t).await;
+
+    // LFS off: the archive holds the pointer file, and shows it as it is.
+    let pointer = page(&t, "/repos/1/blob?path=data.bin").await;
+    assert!(pointer.contains("version https://git-lfs.github.com/spec/v1"));
+    assert!(!archive_dir(&t).join("lfs").exists());
+
+    t.post("/repos/1/settings", "wiki=1&lfs=1").await;
+    assert!(
+        repos::get(&t.state.pool, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .lfs_enabled
+    );
+    repos::schedule_now(&t.state.pool, 1, unix_now())
+        .await
+        .unwrap();
+    sync(&t).await;
+    let synced = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(synced.lfs_size_bytes, content.len() as i64);
+    assert!(page(&t, "/repos/1").await.contains("LFS:"));
+
+    let file = page(&t, "/repos/1/blob?path=data.bin").await;
+    assert!(file.contains("large text line"), "{file}");
+    assert!(!file.contains("git-lfs.github.com"));
+    assert!(file.contains("300 satır"));
+
+    let raw = t.get("/repos/1/raw?path=data.bin").await;
+    assert_eq!(
+        header_value(&raw, header::CONTENT_LENGTH),
+        content.len().to_string()
+    );
+    assert_eq!(body_bytes(raw).await, content.as_bytes());
+
+    let download = t.get("/repos/1/archive?format=tar.gz").await;
+    assert_eq!(download.status(), StatusCode::OK);
+    let archive = body_bytes(download).await;
+    let member = tar_gz_member(t.dir.path(), &archive, "project-main/data.bin");
+    assert_eq!(member, content.as_bytes());
+
+    // A missing object is never downloaded during a request: the pointer
+    // stays in the download, which still succeeds.
+    std::fs::remove_dir_all(archive_dir(&t).join("lfs").join("objects")).unwrap();
+    let download = t.get("/repos/1/archive?format=tar.gz").await;
+    let archive = body_bytes(download).await;
+    let member = tar_gz_member(t.dir.path(), &archive, "project-main/data.bin");
+    assert!(String::from_utf8_lossy(&member).starts_with("version https://git-lfs"));
+    let pointer = page(&t, "/repos/1/blob?path=data.bin").await;
+    assert!(pointer.contains("git-lfs.github.com"));
+}
+
+#[tokio::test]
+async fn an_lfs_object_the_source_lacks_fails_the_sync() {
+    let t = TestApp::new().await;
+    let source = common::lfs_source_repo(t.dir.path(), "lfs-source", b"content\n");
+    std::fs::remove_dir_all(source.join(".git").join("lfs")).unwrap();
+    let url = source.to_string_lossy();
+    let repo = NewRepo {
+        url: &url,
+        host: "local",
+        owner: "team",
+        name: "project",
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled: false,
+    };
+    repos::insert(&t.state.pool, &repo, unix_now())
+        .await
+        .unwrap();
+    t.post("/repos/1/settings", "lfs=1").await;
+    for handle in t.state.scheduler.tick().await.unwrap() {
+        handle.await.unwrap();
+    }
+    let failed = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(failed.status, RepoStatus::Error);
+    let message = failed.last_error.unwrap();
+    assert!(message.starts_with("LFS: git lfs: "), "{message}");
+    // The commits themselves are archived.
+    assert!(archive_dir(&t).join("HEAD").is_file());
+}
+
 #[tokio::test]
 async fn tree_lists_files_and_renders_a_safe_readme() {
     let (t, _) = archived().await;

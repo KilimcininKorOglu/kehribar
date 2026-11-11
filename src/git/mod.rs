@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod http_backend;
+pub mod lfs;
 pub mod maintenance;
 pub mod mirror;
 pub mod read;

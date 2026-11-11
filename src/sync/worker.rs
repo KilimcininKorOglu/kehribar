@@ -8,10 +8,10 @@ use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
 use crate::db::sync_runs::{self, RunOutcome, RunResult};
 use crate::db::unix_now;
-use crate::git::maintenance;
 use crate::git::mirror::{self, SyncReport};
 use crate::git::ssh::KeyFile;
 use crate::git::{Access, Git, GitError, GitErrorKind};
+use crate::git::{lfs, maintenance};
 use crate::notify::{self, Change, Event};
 use crate::providers::RATE_LIMIT_WAIT_SECONDS;
 use crate::ref_filter;
@@ -86,6 +86,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
     let size_bytes = archive_size(&dir).await;
+    let lfs_size_bytes = lfs_size(&dir).await;
 
     log_outcome(repo, status, message.as_deref(), &mirrored.report);
     let outcome = SyncOutcome {
@@ -94,6 +95,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         next_sync_at: finished + interval * 60,
         error: message.as_deref(),
         size_bytes,
+        lfs_size_bytes,
         default_branch: mirrored.report.default_branch.as_deref(),
         has_wiki: mirrored.has_wiki || (status != RepoStatus::Ok && repo.has_wiki),
     };
@@ -284,7 +286,21 @@ async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failu
     } else {
         false
     };
+    if job.repo.lfs_enabled {
+        lfs::fetch(job.git, job.dir, access)
+            .await
+            .map_err(|err| part_failure("LFS", err))?;
+    }
     Ok(Mirrored { report, has_wiki })
+}
+
+/// A failure of the wiki or of the LFS objects: the repository itself was
+/// fetched, so the source is reachable; a rate limit still postpones.
+fn part_failure(part: &str, err: GitError) -> Failure {
+    if err.kind == GitErrorKind::RateLimited {
+        return Failure::from(err);
+    }
+    Failure::error(format!("{part}: {}", err.message))
 }
 
 /// What the fetch proves itself with: for an `ssh://` URL the SSH key of
@@ -322,13 +338,7 @@ async fn mirror_wiki(job: &Job<'_>, access: Option<&Access>) -> Result<bool, Fai
     let wiki_dir = mirror::wiki_dir(job.dir);
     let wiki = mirror::sync_wiki(job.git, &url, &wiki_dir, access, job.now)
         .await
-        .map_err(|err| {
-            if err.kind == GitErrorKind::RateLimited {
-                return Failure::from(err);
-            }
-            // The repository itself is fine; only the wiki failed.
-            Failure::error(format!("wiki: {}", err.message))
-        })?;
+        .map_err(|err| part_failure("wiki", err))?;
     Ok(wiki.is_some())
 }
 
@@ -343,6 +353,17 @@ async fn archive_size(dir: &Path) -> i64 {
         }
     }
     i64::try_from(total).unwrap_or(i64::MAX)
+}
+
+/// Bytes of the LFS objects; also counted when LFS was turned off later.
+async fn lfs_size(dir: &Path) -> i64 {
+    match lfs::objects_size(dir).await {
+        Ok(bytes) => i64::try_from(bytes).unwrap_or(i64::MAX),
+        Err(err) => {
+            tracing::warn!(dir = %dir.display(), %err, "cannot measure the LFS objects");
+            0
+        }
+    }
 }
 
 fn log_outcome(repo: &Repo, status: RepoStatus, message: Option<&str>, report: &SyncReport) {

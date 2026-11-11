@@ -135,6 +135,8 @@ mod tests {
             fsck_error: None,
             last_repack_at: None,
             repack_saved_bytes: None,
+            lfs_enabled: false,
+            lfs_size_bytes: 0,
         }
     }
 

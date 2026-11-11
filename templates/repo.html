@@ -26,7 +26,7 @@
     <div><dt>{{ layout.t("repo.last_sync") }}</dt><dd>{% if let Some(ts) = repo.last_sync_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.last_success") }}</dt><dd>{% if let Some(ts) = repo.last_success_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.next_sync") }}</dt><dd><time title="{{ layout.absolute(repo.next_sync_at) }}">{{ layout.ago(repo.next_sync_at) }}</time></dd></div>
-    <div><dt>{{ layout.t("repo.size") }}</dt><dd>{{ layout.bytes(repo.size_bytes) }}</dd></div>
+    <div><dt>{{ layout.t("repo.size") }}</dt><dd>{{ layout.bytes(repo.size_bytes) }}{% if repo.lfs_size_bytes > 0 %} <span class="muted small">({{ layout.t("repo.lfs_part") }} {{ layout.bytes(repo.lfs_size_bytes) }})</span>{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.default_branch") }}</dt><dd class="mono">{% if let Some(branch) = repo.default_branch %}{{ branch }}{% else %}–{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.wiki") }}</dt><dd>{% if repo.has_wiki %}{{ layout.t("repo.wiki_yes") }}{% else %}{{ layout.t("repo.wiki_no") }}{% endif %}</dd></div>
     <div><dt>{{ layout.t("repo.last_fsck") }}</dt><dd>{% if let Some(ts) = repo.last_fsck_at %}<time title="{{ layout.absolute(ts) }}">{{ layout.ago(ts) }}</time>{% if repo.fsck_error.is_some() %} <span class="badge badge-error">{{ layout.t("repo.fsck_failed") }}</span>{% endif %}{% else %}{{ layout.t("time.never") }}{% endif %}</dd></div>
@@ -93,6 +93,11 @@
         <input type="checkbox" name="wiki" value="1"{% if repo.wiki_enabled %} checked{% endif %}>
         <span>{{ layout.t("repo_new.wiki") }}</span>
       </label>
+      <label class="check">
+        <input type="checkbox" name="lfs" value="1"{% if repo.lfs_enabled %} checked{% endif %}>
+        <span>{{ layout.t("repo.lfs") }}</span>
+      </label>
+      <small class="muted">{{ layout.t("repo.lfs_help") }}</small>
       <label class="field">
         <span>{{ layout.t("refs.exclude") }}</span>
         <textarea name="ref_exclude" rows="3" spellcheck="false" autocomplete="off" placeholder="refs/pull/*">{{ ref_exclude }}</textarea>
