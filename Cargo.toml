@@ -2,7 +2,7 @@
 name = "git-archive"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Mirrors Git repositories with their full history and serves a read-only web UI"
 license = "MIT"
 publish = false
@@ -33,6 +33,7 @@ tokio-util = { version = "0.7.20", features = ["io"] }
 base64 = "0.23"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 reqwest = { version = "0.13", features = ["json"] }
+rusty-s3 = "0.11"
 
 [dev-dependencies]
 tempfile = "3"

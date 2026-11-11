@@ -27,6 +27,7 @@ fn context(config: Config, pool: sqlx::SqlitePool) -> SyncContext {
         cipher: Cipher::new(&config.secret_key),
         config: Arc::new(config),
         catalog: Arc::new(Catalog::load().unwrap()),
+        locks: Default::default(),
     }
 }
 

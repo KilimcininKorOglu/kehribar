@@ -69,4 +69,89 @@
     <button class="btn" type="submit">{{ layout.t("settings.notify_test") }}</button>
   </form>
 </section>
+
+<section class="card form-card" id="backup">
+  <h2>{{ layout.t("settings.backup") }}</h2>
+  <p class="muted">{{ layout.t("settings.backup_intro") }}</p>
+  {% if backup.running %}
+  <p class="alert alert-ok" role="status">{{ layout.t("settings.backup_in_progress") }}</p>
+  {% endif %}
+  {% if let Some(run) = backup.last_run %}
+  {% if let Some(error) = run.error %}
+  <div class="alert alert-error"><strong>{{ layout.tf("settings.backup_last_failed", [("time", layout.absolute(run.at).as_str())]) }}</strong> <span class="mono">{{ error }}</span></div>
+  {% else %}
+  <p>{{ layout.tf("settings.backup_last_ok", [("time", layout.absolute(run.at).as_str()), ("n", run.uploaded.to_string().as_str())]) }}</p>
+  {% endif %}
+  {% else %}
+  <p class="muted">{{ layout.t("settings.backup_never") }}</p>
+  {% endif %}
+  {% if !backup.configured %}<p><strong>{{ layout.t("settings.backup_off") }}</strong></p>{% endif %}
+  <form method="post" action="/settings/backup" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <label class="field">
+      <span>{{ layout.t("settings.s3_endpoint") }}</span>
+      <input name="s3_endpoint" type="url" value="{{ backup.endpoint }}" placeholder="https://" spellcheck="false" autocomplete="off">
+      <small class="muted">{{ layout.t("settings.s3_endpoint_help") }}</small>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.s3_region") }}</span>
+      <input name="s3_region" value="{{ backup.region }}" placeholder="us-east-1" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.s3_bucket") }}</span>
+      <input name="s3_bucket" value="{{ backup.bucket }}" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.s3_prefix") }}</span>
+      <input name="s3_prefix" value="{{ backup.prefix }}" spellcheck="false" autocomplete="off">
+      <small class="muted">{{ layout.t("settings.s3_prefix_help") }}</small>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.s3_access_key_id") }}</span>
+      <input name="s3_access_key_id" value="{{ backup.access_key_id }}" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.s3_secret") }}</span>
+      <input name="s3_secret" type="password" autocomplete="new-password" spellcheck="false">
+      {% if backup.secret_stored %}<small class="muted">{{ layout.t("settings.s3_secret_keep") }}</small>{% endif %}
+    </label>
+    {% if backup.secret_stored %}
+    <label class="check">
+      <input type="checkbox" name="clear_s3_secret" value="1">
+      <span>{{ layout.t("settings.clear_s3_secret") }}</span>
+    </label>
+    {% endif %}
+    <label class="field">
+      <span>{{ layout.t("settings.s3_path_style") }}</span>
+      <select name="s3_path_style">
+        <option value="">{{ layout.t("settings.s3_path_style_env") }}</option>
+        <option value="true"{% if backup.is_path_style("true") %} selected{% endif %}>{{ layout.t("settings.s3_path_style_on") }}</option>
+        <option value="false"{% if backup.is_path_style("false") %} selected{% endif %}>{{ layout.t("settings.s3_path_style_off") }}</option>
+      </select>
+      <small class="muted">{{ layout.t("settings.s3_path_style_help") }}</small>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.backup_interval") }}</span>
+      <input name="interval_hours" type="number" min="1" max="168" value="{{ backup.interval_hours }}" placeholder="{{ backup.env_interval_hours }}" inputmode="numeric">
+      <small class="muted">{{ layout.tf("settings.env_default", [("n", backup.env_interval_hours.to_string().as_str())]) }}</small>
+    </label>
+    <label class="field">
+      <span>{{ layout.t("settings.backup_keep") }}</span>
+      <input name="keep" type="number" min="1" max="365" value="{{ backup.keep }}" placeholder="{{ backup.env_keep }}" inputmode="numeric">
+      <small class="muted">{{ layout.t("settings.backup_keep_help") }}</small>
+      <small class="muted">{{ layout.tf("settings.env_default", [("n", backup.env_keep.to_string().as_str())]) }}</small>
+    </label>
+    <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("form.save") }}</button></div>
+  </form>
+  <div class="actions">
+    <form method="post" action="/settings/backup/test">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <button class="btn" type="submit">{{ layout.t("settings.backup_test") }}</button>
+    </form>
+    <form method="post" action="/settings/backup/run">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <button class="btn" type="submit"{% if backup.running %} disabled{% endif %}>{{ layout.t("settings.backup_run") }}</button>
+    </form>
+  </div>
+</section>
 {% endblock %}

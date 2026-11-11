@@ -114,7 +114,7 @@ impl Event<'_> {
 
     /// The sentence of the notification in the language of `tr`.
     pub fn text(&self, tr: &Tr) -> String {
-        let name = self.repo().map(full_name).unwrap_or_default();
+        let name = self.repo().map(Repo::full_name).unwrap_or_default();
         let status = self
             .statuses()
             .0
@@ -134,10 +134,6 @@ impl Event<'_> {
         let key = format!("notify.{}", self.code());
         format!("{SENDER}: {}", tr.tf(&key, &args))
     }
-}
-
-fn full_name(repo: &Repo) -> String {
-    format!("{}/{}/{}", repo.host, repo.owner, repo.name)
 }
 
 /// Sends `event` to every channel in force. Every channel is tried; the
@@ -205,7 +201,7 @@ fn webhook_body<'a>(event: &'a Event<'_>, text: &'a str, link: Option<String>) -
         content: text,
         repo: event.repo().map(|repo| RepoInfo {
             id: repo.id,
-            name: full_name(repo),
+            name: repo.full_name(),
             url: &repo.url,
         }),
         source: match event {

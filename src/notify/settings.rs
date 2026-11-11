@@ -1,12 +1,12 @@
 //! Notification channels: values saved on the settings page win over the
 //! environment. The Telegram bot token is stored encrypted.
 
-use base64::prelude::{BASE64_STANDARD, Engine as _};
 use sqlx::SqlitePool;
 
 use crate::config::Config;
 use crate::crypto::Cipher;
 use crate::db::settings as store;
+pub use crate::db::settings::SecretChange as TokenChange;
 use crate::i18n::Lang;
 
 const KEY_WEBHOOK_URL: &str = "notify_webhook_url";
@@ -23,15 +23,6 @@ pub struct Saved {
     pub telegram_token_stored: bool,
     pub telegram_chat_id: Option<String>,
     pub lang: Option<Lang>,
-}
-
-/// What a save does with the stored bot token.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenChange {
-    Keep,
-    /// The encrypted new token.
-    Set(Vec<u8>),
-    Clear,
 }
 
 /// The channels in force.
@@ -91,16 +82,10 @@ pub async fn save(
     lang: Option<Lang>,
     token: &TokenChange,
 ) -> sqlx::Result<()> {
-    write(pool, KEY_WEBHOOK_URL, webhook_url).await?;
-    write(pool, KEY_TELEGRAM_CHAT_ID, telegram_chat_id).await?;
-    write(pool, KEY_LANG, lang.map(|l| l.code())).await?;
-    match token {
-        TokenChange::Keep => Ok(()),
-        TokenChange::Set(enc) => {
-            store::set(pool, KEY_TELEGRAM_TOKEN, &BASE64_STANDARD.encode(enc)).await
-        }
-        TokenChange::Clear => store::remove(pool, KEY_TELEGRAM_TOKEN).await,
-    }
+    store::put(pool, KEY_WEBHOOK_URL, webhook_url).await?;
+    store::put(pool, KEY_TELEGRAM_CHAT_ID, telegram_chat_id).await?;
+    store::put(pool, KEY_LANG, lang.map(|l| l.code())).await?;
+    store::put_secret(pool, KEY_TELEGRAM_TOKEN, token).await
 }
 
 /// The channels in force: saved values first, then the environment.
@@ -112,7 +97,7 @@ pub async fn effective(
 ) -> Result<Channels, String> {
     let env = &config.notify;
     let saved = saved(pool).await.map_err(|err| err.to_string())?;
-    let token = match stored_token(pool, cipher).await? {
+    let token = match store::get_secret(pool, cipher, KEY_TELEGRAM_TOKEN).await? {
         Some(token) => Some(token),
         None => env.telegram_bot_token.clone(),
     };
@@ -129,22 +114,6 @@ pub async fn effective(
         telegram,
         lang: saved.lang.unwrap_or(env.lang),
     })
-}
-
-async fn stored_token(pool: &SqlitePool, cipher: &Cipher) -> Result<Option<String>, String> {
-    let Some(text) = store::get(pool, KEY_TELEGRAM_TOKEN)
-        .await
-        .map_err(|err| err.to_string())?
-    else {
-        return Ok(None);
-    };
-    let enc = BASE64_STANDARD
-        .decode(text)
-        .map_err(|err| format!("stored Telegram token is damaged: {err}"))?;
-    cipher
-        .decrypt(&enc)
-        .map(Some)
-        .map_err(|err| format!("cannot decrypt the stored Telegram token: {err}"))
 }
 
 /// Remembers a failed delivery; `None` clears the last error after a
@@ -169,13 +138,6 @@ pub async fn last_error(pool: &SqlitePool) -> sqlx::Result<Option<LastError>> {
         at: at.and_then(|t| t.parse().ok()).unwrap_or_default(),
         message,
     }))
-}
-
-async fn write(pool: &SqlitePool, key: &str, value: Option<&str>) -> sqlx::Result<()> {
-    match value {
-        Some(value) => store::set(pool, key, value).await,
-        None => store::remove(pool, key).await,
-    }
 }
 
 #[cfg(test)]

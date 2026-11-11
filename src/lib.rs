@@ -5,6 +5,7 @@
 #[macro_use]
 mod text_enum;
 
+pub mod backup;
 pub mod config;
 pub mod crypto;
 pub mod db;

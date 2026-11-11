@@ -8,6 +8,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use super::{SyncContext, source_scan, worker};
+use crate::backup;
 use crate::db::sources::{self, Source};
 use crate::db::{repos, unix_now};
 use crate::settings;
@@ -22,9 +23,11 @@ pub struct Scheduler {
     wake: Arc<Notify>,
     /// Set while the scheduled source scan runs, so scans never overlap.
     scanning: Arc<AtomicBool>,
+    /// Set while a backup runs, so backups never overlap.
+    backing_up: Arc<AtomicBool>,
 }
 
-/// Clears the scanning flag even when the scan task panics.
+/// Clears a running flag even when its task panics.
 struct ScanGuard(Arc<AtomicBool>);
 
 impl Drop for ScanGuard {
@@ -51,7 +54,12 @@ impl Scheduler {
             running: Arc::new(AtomicI64::new(0)),
             wake: Arc::new(Notify::new()),
             scanning: Arc::new(AtomicBool::new(false)),
+            backing_up: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn context(&self) -> &SyncContext {
+        &self.ctx
     }
 
     /// Makes the scheduler look for due repositories now.
@@ -72,6 +80,9 @@ impl Scheduler {
                 }
                 if let Err(err) = self.scan_sources().await {
                     tracing::error!(%err, "source scan could not start");
+                }
+                if let Err(err) = self.backup_if_due().await {
+                    tracing::error!(%err, "backup could not start");
                 }
                 tokio::select! {
                     () = tokio::time::sleep(TICK) => {},
@@ -129,6 +140,33 @@ impl Scheduler {
                 this.scan_one(&source).await;
             }
         })))
+    }
+
+    /// Starts a backup when one is configured and its interval has passed.
+    pub async fn backup_if_due(&self) -> sqlx::Result<Option<JoinHandle<()>>> {
+        if self.backing_up.load(Ordering::SeqCst) || !backup::is_due(&self.ctx).await? {
+            return Ok(None);
+        }
+        Ok(self.start_backup())
+    }
+
+    /// Starts a backup now, unless one runs. `None` means one runs already.
+    pub fn start_backup(&self) -> Option<JoinHandle<()>> {
+        if self.backing_up.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        let guard = ScanGuard(self.backing_up.clone());
+        let ctx = self.ctx.clone();
+        Some(tokio::spawn(async move {
+            let _guard = guard;
+            if let Err(err) = backup::run(&ctx, backup::s3::PART_SIZE).await {
+                tracing::error!(%err, "cannot record the backup");
+            }
+        }))
+    }
+
+    pub fn is_backing_up(&self) -> bool {
+        self.backing_up.load(Ordering::SeqCst)
     }
 
     /// Scans one source now, then wakes the loop for the repositories it added.

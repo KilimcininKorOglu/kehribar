@@ -29,6 +29,7 @@ async fn setup() -> Setup {
         cipher: Cipher::new(&config.secret_key),
         config: Arc::new(config),
         catalog: Arc::new(git_archive::i18n::Catalog::load().unwrap()),
+        locks: Default::default(),
     };
     Setup {
         scheduler: Scheduler::new(ctx.clone()),

@@ -12,6 +12,7 @@ use serde::Deserialize;
 use super::form::{InvalidNumber, optional_number};
 use super::pages::{Layout, Nav, render};
 use super::repos::{NoticeQuery, PageContext};
+use super::settings_backup::{self, BackupView};
 use super::settings_notify::{self, NotifyView};
 use crate::error::AppError;
 use crate::settings::{
@@ -92,6 +93,7 @@ struct SettingsPage {
     layout: Layout,
     fields: Vec<Field>,
     notify: NotifyView,
+    backup: BackupView,
     notice: Option<String>,
     errors: Vec<String>,
 }
@@ -104,6 +106,7 @@ pub struct PageState {
     /// Submitted sync field values, shown again with an error.
     pub sync_values: Option<[Option<String>; FIELD_COUNT]>,
     pub notify: Option<NotifyView>,
+    pub backup: Option<BackupView>,
     pub status: StatusCode,
 }
 
@@ -114,6 +117,7 @@ impl Default for PageState {
             errors: Vec::new(),
             sync_values: None,
             notify: None,
+            backup: None,
             status: StatusCode::OK,
         }
     }
@@ -133,6 +137,10 @@ pub async fn respond(
         Some(view) => view,
         None => settings_notify::load(ctx, &layout).await?,
     };
+    let backup = match state.backup {
+        Some(view) => view,
+        None => settings_backup::load(ctx).await?,
+    };
     let page = SettingsPage {
         fields: fields(
             &layout,
@@ -140,6 +148,7 @@ pub async fn respond(
             SyncSettings::from_config(&ctx.state.config),
         ),
         notify,
+        backup,
         layout,
         notice: state.notice,
         errors: state.errors,
@@ -192,6 +201,9 @@ fn notice_key(notice: Option<&str>) -> Option<&'static str> {
     match notice? {
         "saved" => Some("settings.saved"),
         "notify_saved" => Some("settings.notify_saved"),
+        "backup_saved" => Some("settings.backup_saved"),
+        "backup_started" => Some("settings.backup_started"),
+        "backup_running" => Some("settings.backup_running"),
         _ => None,
     }
 }

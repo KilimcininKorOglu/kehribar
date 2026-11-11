@@ -575,10 +575,10 @@ pub fn parse_blame(text: &str) -> Blame {
             }
         } else if current.is_none() {
             current = blame_header(line);
-        } else if let Some((key, value)) = line.split_once(' ') {
-            if matches!(key, "author" | "author-time" | "summary") {
-                info.insert(key, value.to_owned());
-            }
+        } else if let Some((key, value)) = line.split_once(' ')
+            && matches!(key, "author" | "author-time" | "summary")
+        {
+            info.insert(key, value.to_owned());
         }
     }
     blame

@@ -1,5 +1,6 @@
 //! SQLite storage for repository metadata, credentials, settings and sessions.
 
+pub mod backups;
 pub mod hosts;
 pub mod repos;
 pub mod sessions;

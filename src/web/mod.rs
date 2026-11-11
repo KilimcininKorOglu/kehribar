@@ -12,6 +12,7 @@ pub mod pages;
 pub mod prefs;
 pub mod repos;
 pub mod security;
+pub mod settings_backup;
 pub mod settings_notify;
 pub mod settings_page;
 pub mod sources;
@@ -30,6 +31,7 @@ use crate::config::Config;
 use crate::crypto::Cipher;
 use crate::i18n::Catalog;
 use crate::sync::SyncContext;
+use crate::sync::locks::RepoLocks;
 use crate::sync::scheduler::Scheduler;
 
 /// State shared by every request handler.
@@ -54,6 +56,7 @@ impl AppState {
             cipher: cipher.clone(),
             config: config.clone(),
             catalog: catalog.clone(),
+            locks: RepoLocks::default(),
         });
         Self {
             pool,
@@ -66,13 +69,9 @@ impl AppState {
     }
 
     /// The context background work uses, for work a request starts itself.
+    /// It shares the repository locks of the scheduler.
     pub fn sync_context(&self) -> SyncContext {
-        SyncContext {
-            pool: self.pool.clone(),
-            cipher: self.cipher.clone(),
-            config: self.config.clone(),
-            catalog: self.catalog.clone(),
-        }
+        self.scheduler.context().clone()
     }
 }
 
@@ -128,6 +127,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/settings/notifications", post(settings_notify::save))
         .route("/settings/notifications/test", post(settings_notify::test))
+        .route("/settings/backup", post(settings_backup::save))
+        .route("/settings/backup/test", post(settings_backup::test))
+        .route("/settings/backup/run", post(settings_backup::run))
         .route("/logout", post(auth::logout))
         .layer(from_fn(security::verify_csrf))
         .layer(from_fn_with_state(state.clone(), auth::require_session));

@@ -48,6 +48,13 @@ pub struct Repo {
     pub repack_saved_bytes: Option<i64>,
 }
 
+impl Repo {
+    /// `host/owner/name`, the name that notifications and backups show.
+    pub fn full_name(&self) -> String {
+        format!("{}/{}/{}", self.host, self.owner, self.name)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NewRepo<'a> {
     pub url: &'a str,

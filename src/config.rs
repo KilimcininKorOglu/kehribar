@@ -30,6 +30,16 @@ pub const ENV_NOTIFY_TELEGRAM_CHAT_ID: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_CHAT_
 pub const ENV_NOTIFY_TELEGRAM_API_URL: &str = "GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL";
 pub const ENV_NOTIFY_LANG: &str = "GIT_ARCHIVE_NOTIFY_LANG";
 
+pub const ENV_BACKUP_S3_ENDPOINT: &str = "GIT_ARCHIVE_BACKUP_S3_ENDPOINT";
+pub const ENV_BACKUP_S3_REGION: &str = "GIT_ARCHIVE_BACKUP_S3_REGION";
+pub const ENV_BACKUP_S3_BUCKET: &str = "GIT_ARCHIVE_BACKUP_S3_BUCKET";
+pub const ENV_BACKUP_S3_PREFIX: &str = "GIT_ARCHIVE_BACKUP_S3_PREFIX";
+pub const ENV_BACKUP_S3_ACCESS_KEY_ID: &str = "GIT_ARCHIVE_BACKUP_S3_ACCESS_KEY_ID";
+pub const ENV_BACKUP_S3_SECRET_ACCESS_KEY: &str = "GIT_ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY";
+pub const ENV_BACKUP_S3_PATH_STYLE: &str = "GIT_ARCHIVE_BACKUP_S3_PATH_STYLE";
+pub const ENV_BACKUP_INTERVAL_HOURS: &str = "GIT_ARCHIVE_BACKUP_INTERVAL_HOURS";
+pub const ENV_BACKUP_KEEP: &str = "GIT_ARCHIVE_BACKUP_KEEP";
+
 /// Telegram Bot API used when `GIT_ARCHIVE_NOTIFY_TELEGRAM_API_URL` is not set.
 pub const DEFAULT_TELEGRAM_API_URL: &str = "https://api.telegram.org";
 
@@ -70,6 +80,60 @@ pub struct Config {
     /// Notifications link to it when it is set.
     pub public_url: Option<String>,
     pub notify: NotifyConfig,
+    pub backup: BackupConfig,
+}
+
+/// The S3-compatible storage that receives the bundles, from the
+/// environment; the settings page can override each value.
+#[derive(Clone)]
+pub struct BackupConfig {
+    pub endpoint: Option<String>,
+    pub region: String,
+    pub bucket: Option<String>,
+    pub prefix: String,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    /// `https://endpoint/bucket/key` instead of `https://bucket.endpoint/key`;
+    /// MinIO needs it.
+    pub path_style: bool,
+    pub interval_hours: u32,
+    /// Bundles kept per repository.
+    pub keep: u32,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: None,
+            region: String::from("us-east-1"),
+            bucket: None,
+            prefix: String::new(),
+            access_key_id: None,
+            secret_access_key: None,
+            path_style: false,
+            interval_hours: 24,
+            keep: 7,
+        }
+    }
+}
+
+impl fmt::Debug for BackupConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackupConfig")
+            .field("endpoint", &self.endpoint)
+            .field("region", &self.region)
+            .field("bucket", &self.bucket)
+            .field("prefix", &self.prefix)
+            .field("access_key_id", &self.access_key_id)
+            .field(
+                "secret_access_key",
+                &self.secret_access_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("path_style", &self.path_style)
+            .field("interval_hours", &self.interval_hours)
+            .field("keep", &self.keep)
+            .finish()
+    }
 }
 
 /// Notification channels from the environment; the settings page can
@@ -127,6 +191,7 @@ impl fmt::Debug for Config {
             .field("log_level", &self.log_level)
             .field("public_url", &self.public_url)
             .field("notify", &self.notify)
+            .field("backup", &self.backup)
             .finish()
     }
 }
@@ -148,6 +213,7 @@ impl Config {
         config.apply_server_settings(&env)?;
         config.apply_sync_settings(&env)?;
         config.apply_notify_settings(&env)?;
+        config.apply_backup_settings(&env)?;
         Ok(config)
     }
 
@@ -172,7 +238,25 @@ impl Config {
             log_level: String::from("info"),
             public_url: None,
             notify: NotifyConfig::default(),
+            backup: BackupConfig::default(),
         })
+    }
+
+    fn apply_backup_settings<F>(&mut self, env: &Env<F>) -> Result<(), ConfigError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let backup = &mut self.backup;
+        backup.endpoint = env.http_url(ENV_BACKUP_S3_ENDPOINT)?;
+        backup.region = env.parsed(ENV_BACKUP_S3_REGION, backup.region.clone())?;
+        backup.bucket = env.get(ENV_BACKUP_S3_BUCKET);
+        backup.prefix = env.parsed(ENV_BACKUP_S3_PREFIX, String::new())?;
+        backup.access_key_id = env.get(ENV_BACKUP_S3_ACCESS_KEY_ID);
+        backup.secret_access_key = env.get(ENV_BACKUP_S3_SECRET_ACCESS_KEY);
+        backup.path_style = env.boolean(ENV_BACKUP_S3_PATH_STYLE, backup.path_style)?;
+        backup.interval_hours = env.positive(ENV_BACKUP_INTERVAL_HOURS, backup.interval_hours)?;
+        backup.keep = env.positive(ENV_BACKUP_KEEP, backup.keep)?;
+        Ok(())
     }
 
     fn apply_notify_settings<F>(&mut self, env: &Env<F>) -> Result<(), ConfigError>
@@ -468,6 +552,29 @@ mod tests {
                 ConfigError::Invalid { .. }
             ));
         }
+    }
+
+    #[test]
+    fn backup_settings_are_read_and_the_secret_is_hidden() {
+        let config = load(&required()).unwrap();
+        assert_eq!(config.backup.region, "us-east-1");
+        assert_eq!((config.backup.interval_hours, config.backup.keep), (24, 7));
+
+        let mut pairs = required();
+        pairs.push((ENV_BACKUP_S3_ENDPOINT, "http://minio:9000/"));
+        pairs.push((ENV_BACKUP_S3_BUCKET, "archive"));
+        pairs.push((ENV_BACKUP_S3_SECRET_ACCESS_KEY, "s3cr3t-value"));
+        pairs.push((ENV_BACKUP_S3_PATH_STYLE, "true"));
+        pairs.push((ENV_BACKUP_KEEP, "3"));
+        let config = load(&pairs).unwrap();
+        assert_eq!(config.backup.endpoint.as_deref(), Some("http://minio:9000"));
+        assert!(config.backup.path_style);
+        assert_eq!(config.backup.keep, 3);
+        assert!(!format!("{config:?}").contains("s3cr3t-value"));
+
+        let mut pairs = required();
+        pairs.push((ENV_BACKUP_KEEP, "0"));
+        assert!(load(&pairs).is_err());
     }
 
     #[test]

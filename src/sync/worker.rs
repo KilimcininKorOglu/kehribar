@@ -45,6 +45,8 @@ impl From<GitError> for Failure {
 
 /// Syncs a repository that the caller has claimed and records the result.
 pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx::Result<()> {
+    // A backup may be reading the repository; the sync waits for it.
+    let _lock = ctx.locks.lock(repo.id).await;
     let started = unix_now();
     let run_id = sync_runs::start(&ctx.pool, repo.id, started).await?;
     tracing::info!(repo = %repo.url, "sync started");

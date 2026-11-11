@@ -1,6 +1,7 @@
 //! Background synchronisation of the archived repositories.
 
 pub mod credentials;
+pub mod locks;
 pub mod scheduler;
 pub mod source_scan;
 pub mod worker;
@@ -24,6 +25,7 @@ pub struct SyncContext {
     pub config: Arc<Config>,
     /// Translations for the notifications.
     pub catalog: Arc<Catalog>,
+    pub locks: locks::RepoLocks,
 }
 
 impl SyncContext {
