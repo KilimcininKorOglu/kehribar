@@ -4,6 +4,7 @@ pub mod assets;
 pub mod credentials;
 pub mod locks;
 pub mod ref_log;
+pub mod relocate;
 pub mod scheduler;
 pub mod source_scan;
 pub mod worker;

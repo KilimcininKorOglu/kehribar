@@ -157,6 +157,17 @@ pub async fn find_by_path(
         .await
 }
 
+/// Changes the owner part of the archive path; the caller moves the
+/// archive directory with it.
+pub async fn set_owner(pool: &SqlitePool, id: i64, owner: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE repos SET owner = ? WHERE id = ?")
+        .bind(owner)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
 /// Lists repositories, optionally filtered by a literal substring of the
 /// URL or the owner/name. A blank search lists every repository.
 pub async fn list(pool: &SqlitePool, search: Option<&str>) -> sqlx::Result<Vec<Repo>> {

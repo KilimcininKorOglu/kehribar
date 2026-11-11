@@ -17,7 +17,7 @@ use crate::db::repos::{self, NewRepo, Repo};
 use crate::db::sources::{self, NewSource, Source, SourceKind, SourceOptions};
 use crate::db::unix_now;
 use crate::providers;
-use crate::repo_url::{self, GIST_HOST, RepoLocation};
+use crate::repo_url::{self, GIST_HOST};
 use crate::web::form::optional_text;
 use crate::web::hosts::{CheckedHost, HostValues, check_host};
 use crate::web::repos::{CheckedSettings, SettingsInput, check_settings};
@@ -420,16 +420,14 @@ async fn import_source(
     Ok(row(outcome))
 }
 
-/// Applies the checks of the add form and the repository settings.
-fn check_repo(entry: &RepoEntry) -> Result<(RepoLocation, CheckedSettings), &'static str> {
-    let location = repo_url::parse(&entry.url).map_err(|err| err.message_key())?;
-    let settings = check_settings(&SettingsInput {
+/// Applies the checks of the repository settings form.
+fn check_repo(entry: &RepoEntry) -> Result<CheckedSettings, &'static str> {
+    check_settings(&SettingsInput {
         interval_minutes: entry.interval_minutes,
         wiki_enabled: entry.wiki_enabled,
         lfs_enabled: entry.lfs_enabled,
         ref_exclude: text(entry.ref_exclude.as_ref()).unwrap_or(""),
-    })?;
-    Ok((location, settings))
+    })
 }
 
 /// The id of the source the entry names; `None` when it is not in the archive.
@@ -457,8 +455,13 @@ async fn import_repo(
         name: entry.url.clone(),
         outcome,
     };
-    let (location, settings) = match check_repo(entry) {
-        Ok(checked) => checked,
+    // Hosts are imported first, so their providers decide the archive path.
+    let location = match repo_url::locate(&mut *conn, &entry.url).await? {
+        Ok(location) => location,
+        Err(err) => return Ok(row(Outcome::Invalid(err.message_key()))),
+    };
+    let settings = match check_repo(entry) {
+        Ok(settings) => settings,
         Err(key) => return Ok(row(Outcome::Invalid(key))),
     };
     let source_id = linked_source(&mut *conn, entry.source.as_ref()).await?;

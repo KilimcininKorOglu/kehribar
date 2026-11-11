@@ -422,7 +422,7 @@ pub(super) async fn add_repo(
     url: &str,
     settings: &AddSettings<'_>,
 ) -> Result<Added, AppError> {
-    let location = match repo_url::parse(url) {
+    let location = match repo_url::locate(&state.pool, url).await? {
         Ok(location) => location,
         Err(err) => return Ok(Added::Invalid(err.message_key())),
     };
