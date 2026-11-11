@@ -91,8 +91,12 @@ pub async fn sync(
 ) -> Result<SyncReport, GitError> {
     // Ask the source first: a missing repository leaves no directory behind.
     let remote = remote_refs(git, url, access).await?;
+    // Before any `git config` write: a `config.lock` left by a killed sync
+    // would make the first of them fail on every later sync.
+    if dir.join("HEAD").is_file() {
+        remove_stale_locks(dir).await?;
+    }
     prepare_repository(git, url, dir, exclude).await?;
-    remove_stale_locks(dir).await?;
 
     let before = list_refs(git, dir).await?;
     git.run(

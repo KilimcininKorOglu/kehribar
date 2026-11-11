@@ -313,12 +313,15 @@ async fn stale_lock_files_from_a_killed_sync_are_removed() {
     source.sync(100).await;
     std::fs::write(source.archive.join("packed-refs.lock"), "").unwrap();
     std::fs::write(source.archive.join("refs/heads/main.lock"), "").unwrap();
+    // A sync killed while it wrote the configuration.
+    std::fs::write(source.archive.join("config.lock"), "").unwrap();
 
     source.commit("two");
     let report = source.sync(200).await;
     assert_eq!(report.refs_changed, 1);
     assert!(!source.archive.join("packed-refs.lock").exists());
     assert!(!source.archive.join("refs/heads/main.lock").exists());
+    assert!(!source.archive.join("config.lock").exists());
 }
 
 #[tokio::test]
