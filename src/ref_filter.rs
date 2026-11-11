@@ -76,9 +76,16 @@ fn is_valid(pattern: &str) -> bool {
         pattern.matches('*').count() <= 1,
         !FORBIDDEN_PARTS.iter().any(|part| pattern.contains(part)),
         !FORBIDDEN_ENDINGS.iter().any(|end| pattern.ends_with(end)),
+        pattern.split('/').all(is_allowed_component),
         pattern.chars().all(is_allowed_char),
     ];
     checks.iter().all(|ok| *ok)
+}
+
+/// Git refuses a ref whose `/`-separated part starts with `.` or ends with
+/// `.lock`, anywhere in the name.
+fn is_allowed_component(part: &str) -> bool {
+    !part.starts_with('.') && !part.ends_with(".lock")
 }
 
 /// Git forbids these in ref names; `*` is the one wildcard a refspec takes.
@@ -114,6 +121,10 @@ mod tests {
             "refs/heads/x.lock",
             "refs/heads/x/",
             "refs/heads/a?",
+            // Inside the name too: git fails the whole fetch on these.
+            "refs/heads/.x",
+            "refs/heads/a/.b/*",
+            "refs/heads/a.lock/b",
         ] {
             assert_eq!(
                 normalize(bad),
