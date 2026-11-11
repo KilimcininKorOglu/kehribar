@@ -10,7 +10,7 @@ The archive never loses data that it fetched once:
 - A repository that the source deletes or makes unreachable is marked "source unreachable". Its archive stays as it is.
 - A repository that disappears from a watched user or organization stays in the archive.
 
-Pull requests, issues and Git LFS objects are not archived.
+Pull requests and issues are not archived. Git LFS objects are archived only for the repositories that turn LFS on.
 
 ## Features
 
