@@ -7,7 +7,9 @@ use super::{Api, ProviderError, RemoteRepo};
 use crate::db::hosts::Provider;
 use crate::db::sources::SourceKind;
 
-/// The default maximum page size of Gitea and Forgejo.
+/// The default maximum page size of Gitea and Forgejo. A server set to a
+/// lower `MAX_RESPONSE_ITEMS` answers with smaller pages, so the list is
+/// read until an empty page.
 const LIMIT: usize = 50;
 
 #[derive(Deserialize)]
@@ -30,7 +32,7 @@ pub async fn list(
         SourceKind::Starred => api.url(&["users", name, "starred"])?,
         SourceKind::Gists => return Err(ProviderError::kind(Provider::Forgejo, kind)),
     };
-    let repos: Vec<Repo> = api.paged(url, "limit", LIMIT).await?;
+    let repos: Vec<Repo> = api.paged_until_empty(url, "limit", LIMIT).await?;
     Ok(repos
         .into_iter()
         .map(|repo| RemoteRepo {

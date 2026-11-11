@@ -170,6 +170,29 @@ impl Api {
         size_param: &str,
         size: usize,
     ) -> Result<Vec<T>, ProviderError> {
+        self.pages(url, size_param, size, |len| len < size).await
+    }
+
+    /// Like [`Api::paged`], but reads until an empty page: for a server that
+    /// may answer with fewer items per page than the size asked for.
+    async fn paged_until_empty<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        size_param: &str,
+        size: usize,
+    ) -> Result<Vec<T>, ProviderError> {
+        self.pages(url, size_param, size, |len| len == 0).await
+    }
+
+    /// Reads pages until `last` says, from the number of items of a page,
+    /// that it was the last one.
+    async fn pages<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        size_param: &str,
+        size: usize,
+        last: impl Fn(usize) -> bool,
+    ) -> Result<Vec<T>, ProviderError> {
         let mut items = Vec::new();
         for page in 1..=MAX_PAGES {
             let mut page_url = url.clone();
@@ -178,9 +201,9 @@ impl Api {
                 .append_pair(size_param, &size.to_string())
                 .append_pair("page", &page.to_string());
             let batch: Vec<T> = self.json(page_url).await?;
-            let last = batch.len() < size;
+            let done = last(batch.len());
             items.extend(batch);
-            if last {
+            if done {
                 return Ok(items);
             }
         }

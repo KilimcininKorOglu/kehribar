@@ -157,7 +157,7 @@ async fn starred_lists_page_on_every_provider_that_has_them() {
         ]
     );
 
-    // Forgejo / Gitea.
+    // Forgejo / Gitea: read until an empty page.
     mount_page(
         &server,
         "/api/v1/users/alice/starred",
@@ -165,6 +165,7 @@ async fn starred_lists_page_on_every_provider_that_has_them() {
         items(0, 1, github_repo),
     )
     .await;
+    mount_page(&server, "/api/v1/users/alice/starred", "2", json!([])).await;
     let forgejo = host(Provider::Forgejo, format!("{}/api/v1", server.uri()));
     let repos = list_repos(&forgejo, None, SourceKind::Starred, "alice")
         .await
@@ -330,7 +331,13 @@ async fn forgejo_pages_by_fifty_with_a_token_header() {
     let server = MockServer::start().await;
     let repo =
         |n: usize| json!({ "clone_url": format!("https://git.example/u/r{n}.git"), "fork": false });
-    for (page, body) in [("1", items(0, 50, repo)), ("2", json!([]))] {
+    // A server whose MAX_RESPONSE_ITEMS is 30 answers 30 items for limit=50.
+    for (page, body) in [
+        ("1", items(0, 30, repo)),
+        ("2", items(30, 30, repo)),
+        ("3", items(60, 5, repo)),
+        ("4", json!([])),
+    ] {
         Mock::given(method("GET"))
             .and(path("/api/v1/users/u/repos"))
             .and(query_param("limit", "50"))
@@ -346,7 +353,7 @@ async fn forgejo_pages_by_fifty_with_a_token_header() {
     let repos = list_repos(&host, Some(&token), SourceKind::User, "u")
         .await
         .unwrap();
-    assert_eq!(repos.len(), 50);
+    assert_eq!(repos.len(), 65);
 }
 
 fn bitbucket_page(server: &str, names: &[&str], next: Option<&str>) -> Value {
