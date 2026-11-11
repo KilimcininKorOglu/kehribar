@@ -189,6 +189,11 @@ async fn history_page_shows_a_past_day() {
 
     let today = page(&t, "/repos/1/history").await;
     assert!(today.contains(&format!("/repos/1/commit/{new_main}")));
+    // A page past the last one shows the last page; a huge number does
+    // not overflow the offset.
+    let far = page(&t, "/repos/1/history?page=200000000000000000").await;
+    assert!(far.contains(&format!("/repos/1/commit/{new_main}")), "{far}");
+    assert!(!far.contains("200000000000000000"));
     assert!(today.contains("İlerledi"));
     assert!(today.contains(&format!("value=\"{}\"", day(0))));
 

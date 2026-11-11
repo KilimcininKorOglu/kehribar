@@ -192,6 +192,9 @@ pub async fn show(
     let (end, page) = query.parse(now).ok_or(AppError::NotFound)?;
     let (since, rewrites) = recording(pool, id, end).await?;
     let total = ref_events::count_until(pool, id, end).await?;
+    // A page past the last one shows the last; this also keeps the offset
+    // from overflowing for a huge page number.
+    let page = page.min(((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1));
     let mut states = ref_events::state_at(pool, id, end).await?;
     sort_by_name(&mut states);
     let page = HistoryPage {
