@@ -28,7 +28,9 @@ Pull requests and issues are not archived. Git LFS objects are archived only for
 - Wiki browsing: Markdown, AsciiDoc and reStructuredText pages are rendered, other formats are shown as text.
 - The repository list filters by status, sorts by name, size, last sync or status, and pages by 50.
 - A disk page: the archive size, the LFS share, the 20 largest repositories and the growth of the last 90 days.
-- Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
+- Restore: read-only `git clone` over smart HTTP with the admin credentials or a revocable clone token, and ZIP or tar.gz download of any revision.
+- A push webhook URL per repository that syncs it right after a push, on any provider.
+- A REST API with read-only or read-write API tokens for repositories, hosts and sources.
 - Ref exclude patterns per host and per repository, for example `refs/pull/*`.
 - Scheduled integrity checks (`git fsck`) and disk maintenance (`git repack`) of every archive.
 - Webhook and Telegram notifications when a repository, a source scan or the backup fails and when it works again.
@@ -257,6 +259,52 @@ http://localhost:8600/hooks/gaw_...
 - A `POST` answers `202` and makes the repository due at once. A call while the repository syncs makes it sync once more when that sync finishes; several calls during one sync add up to that one more sync.
 - "Renew URL" replaces the token and the old URL answers `404`; "Remove" deletes it. Wrong tokens count against the per-address lockout of the login form.
 - The URL uses `GIT_ARCHIVE_PUBLIC_URL` when it is set, else the address the browser used.
+
+## REST API
+
+The API lives under `/api/v1` and speaks JSON. Create an API token on Settings, "Access tokens" (`/settings/tokens`), with read-only or read-write permission and an optional expiry, and send it as a Bearer token:
+
+```sh
+curl -H "Authorization: Bearer gaa_..." http://localhost:8600/api/v1/repos
+```
+
+- A read-only token may only send `GET`; any other method answers `403` with the code `read_only`.
+- A missing, wrong, revoked or expired token answers `401`. Wrong tokens count against the per-address lockout of the login form; a locked address gets `429`.
+- Answers never contain a secret. A stored token or SSH private key shows as `has_token` or `has_ssh_key`; a host shows its SSH public key.
+- Errors have the shape `{"error": {"code": "...", "message": "..."}}`. A value the web form would refuse answers `422` (or `409` when the record exists already) with the form's message key as the code, for example `form.interval_invalid`, `refs.invalid` or `repo_new.exists`. A body that is not valid JSON or has an unknown field answers with the code `invalid_body`.
+- Times are Unix seconds. Ref and name patterns are arrays of strings.
+
+| Method and path | Effect |
+|---|---|
+| `GET /repos` | Repositories, filtered and paged: `q` (text in the URL or `owner/name`), `status` (`pending`, `syncing`, `ok`, `error`, `unreachable`), `sort` (`name`, `size`, `synced`, `status`), `dir` (`asc`, `desc`), `page` (from 1), `per_page` (1 to 100, default 50). The answer is `{"repos": [...], "total", "page", "per_page"}`; `total` counts every match. |
+| `GET /repos/{id}` | One repository. |
+| `GET /repos/{id}/runs` | Its sync runs, newest first; `limit` is 1 to 200, default 50. |
+| `POST /repos` | Adds a repository: `url` and optional `interval_minutes`, `wiki_enabled` (default `true`), `lfs_enabled`, `ref_exclude`, `username`, `token`. Answers `201` and syncs it at once. |
+| `PATCH /repos/{id}` | Changes `interval_minutes` (`null` for the global interval), `wiki_enabled`, `lfs_enabled`, `ref_exclude`. Fields that are absent keep their value. |
+| `PUT /repos/{id}/credentials` | Sets `username` and `token`. Without a `token` field the stored token stays; `null` removes it. |
+| `DELETE /repos/{id}` | Deletes the repository with its archive. A repository that syncs now answers `409` (`repo.delete_busy`). |
+| `POST /repos/{id}/sync` | Syncs now, or once more after the running sync, like a push webhook. Answers `202`. |
+| `GET /hosts`, `GET /hosts/{id}` | Hosts. |
+| `POST /hosts` | Adds a host: `host`, `provider` (`github`, `gitlab`, `forgejo`, `bitbucket`, `gitee`, `azure`, `sourcehut`, `generic`) and optional `api_base_url`, `username`, `token`, `ref_exclude`, `max_concurrency`. |
+| `PATCH /hosts/{id}` | Changes any of those fields; `token: null` removes the token. |
+| `DELETE /hosts/{id}` | Deletes the host and its sources; the repositories stay. |
+| `PUT /hosts/{id}/ssh-key` | Stores `private_key`, a private key that `ssh-keygen` can read, and answers the host with its public key line. |
+| `DELETE /hosts/{id}/ssh-key` | Removes the SSH key. |
+| `GET /sources`, `GET /sources/{id}` | Sources. |
+| `POST /sources` | Adds a source and scans it: `host_id`, `kind` (`user`, `org`, `starred`, `gists`), `name` and optional `auto_add` (default `true`), `include_forks`, `skip_archived`, `use_ssh`, `include_patterns`, `exclude_patterns`. |
+| `PATCH /sources/{id}` | Changes the options. |
+| `DELETE /sources/{id}` | Deletes the source; its repositories stay. |
+| `POST /sources/{id}/scan` | Scans in the background. Answers `202`. |
+
+```sh
+TOKEN=gaa_...
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"url": "https://github.com/octocat/Hello-World", "ref_exclude": ["refs/pull/*"]}' \
+  http://localhost:8600/api/v1/repos
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"interval_minutes": 60}' http://localhost:8600/api/v1/repos/1
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8600/api/v1/repos/1/sync
+```
 
 ## Development
 
