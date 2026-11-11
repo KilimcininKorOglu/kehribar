@@ -18,9 +18,9 @@ use crate::db::sync_runs::{self, SyncRun};
 use crate::db::unix_now;
 use crate::error::AppError;
 use crate::git::mirror;
-use crate::repo_url;
 use crate::settings::INTERVAL_RANGE;
 use crate::sync::credentials::{self, CredentialSource};
+use crate::{ref_filter, repo_url};
 
 /// Sync runs listed on the detail page.
 const HISTORY_LIMIT: i64 = 20;
@@ -205,9 +205,17 @@ struct DetailPage {
     tab: &'static str,
     /// `git clone` URL of the archive on this site.
     clone_url: String,
+    /// Text of the ref pattern field, one pattern per line.
+    ref_exclude: String,
 }
 
 impl DetailPage {
+    /// The host's ref patterns, which apply to this repository too.
+    fn host_ref_exclude(&self) -> Option<String> {
+        let patterns = self.host.as_ref()?.ref_exclude.as_deref()?;
+        Some(patterns.lines().collect::<Vec<_>>().join(", "))
+    }
+
     fn busy(&self) -> bool {
         matches!(self.repo.status, RepoStatus::Pending | RepoStatus::Syncing)
     }
@@ -257,6 +265,7 @@ async fn detail_page(
             .map(|m| m.to_string())
             .unwrap_or_default(),
         full_name: format!("{}/{}", repo.owner, repo.name),
+        ref_exclude: repo.ref_exclude.clone().unwrap_or_default(),
         global_interval,
         global_minutes: global.interval_minutes,
         layout,
@@ -321,6 +330,21 @@ pub async fn sync_now(
 pub struct RepoSettingsForm {
     wiki: Option<String>,
     interval: Option<String>,
+    ref_exclude: Option<String>,
+}
+
+/// Shows the repository page again with the submitted pattern text and the
+/// error of `message_key`.
+async fn settings_error(
+    ctx: &PageContext,
+    repo: Repo,
+    form: &RepoSettingsForm,
+    message_key: &str,
+) -> Result<Response, AppError> {
+    let message = ctx.layout(Nav::Repos).t(message_key).to_owned();
+    let mut page = detail_page(ctx, repo, None, Some(message)).await?;
+    page.ref_exclude = form.ref_exclude.clone().unwrap_or_default();
+    Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response())
 }
 
 pub async fn update(
@@ -330,13 +354,15 @@ pub async fn update(
 ) -> Result<Response, AppError> {
     let repo = load_repo(&ctx.state, id).await?;
     let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {
-        let message = ctx.layout(Nav::Repos).t("form.interval_invalid").to_owned();
-        let page = detail_page(&ctx, repo, None, Some(message)).await?;
-        return Ok((StatusCode::UNPROCESSABLE_ENTITY, render(&page)?).into_response());
+        return settings_error(&ctx, repo, &form, "form.interval_invalid").await;
+    };
+    let Ok(ref_exclude) = ref_filter::normalize(form.ref_exclude.as_deref().unwrap_or("")) else {
+        return settings_error(&ctx, repo, &form, "refs.invalid").await;
     };
     let settings = RepoSettings {
         interval_minutes: interval,
         wiki_enabled: is_checked(form.wiki.as_deref()),
+        ref_exclude: ref_exclude.as_deref(),
     };
     repos::update_settings(&ctx.state.pool, id, settings).await?;
     Ok(Redirect::to(&format!("/repos/{id}?notice=saved")).into_response())

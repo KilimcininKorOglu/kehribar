@@ -36,17 +36,20 @@ pub struct SyncReport {
 }
 
 /// Fetches every ref of `url` into the bare repository at `dir`, creating
-/// the repository on the first run. `now` names the rescue refs.
+/// the repository on the first run. `now` names the rescue refs. Refs that
+/// match a pattern of `exclude` are not fetched; the archive keeps the ones
+/// it already has.
 pub async fn sync(
     git: &Git,
     url: &str,
     dir: &Path,
     credentials: Option<&Credentials>,
     now: i64,
+    exclude: &[String],
 ) -> Result<SyncReport, GitError> {
     // Ask the source first: a missing repository leaves no directory behind.
     let remote_head = remote_head(git, url, credentials).await?;
-    prepare_repository(git, url, dir).await?;
+    prepare_repository(git, url, dir, exclude).await?;
     remove_stale_locks(dir).await?;
 
     let before = list_refs(git, dir).await?;
@@ -76,7 +79,7 @@ pub async fn sync_wiki(
     credentials: Option<&Credentials>,
     now: i64,
 ) -> Result<Option<SyncReport>, GitError> {
-    match sync(git, wiki_url, dir, credentials, now).await {
+    match sync(git, wiki_url, dir, credentials, now, &[]).await {
         Ok(report) => Ok(Some(report)),
         Err(err) if err.kind == GitErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
@@ -126,7 +129,12 @@ async fn remote_head(
     }))
 }
 
-async fn prepare_repository(git: &Git, url: &str, dir: &Path) -> Result<(), GitError> {
+async fn prepare_repository(
+    git: &Git,
+    url: &str,
+    dir: &Path,
+    exclude: &[String],
+) -> Result<(), GitError> {
     if !dir.join("HEAD").is_file() {
         if let Some(parent) = dir.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
@@ -148,6 +156,17 @@ async fn prepare_repository(git: &Git, url: &str, dir: &Path) -> Result<(), GitE
     for (key, value) in REPO_CONFIG {
         git.run(Some(dir), ["config", key, value], None).await?;
     }
+    configure_origin(git, url, dir, exclude).await
+}
+
+/// Points `origin` at `url` and sets its refspecs: every ref, except the
+/// archive's own refs and the excluded patterns.
+async fn configure_origin(
+    git: &Git,
+    url: &str,
+    dir: &Path,
+    exclude: &[String],
+) -> Result<(), GitError> {
     git.run(Some(dir), ["config", "remote.origin.url", url], None)
         .await?;
     git.run(
@@ -161,13 +180,18 @@ async fn prepare_repository(git: &Git, url: &str, dir: &Path) -> Result<(), GitE
         None,
     )
     .await?;
-    let exclude = format!("^{ARCHIVE_REF_PREFIX}*");
-    git.run(
-        Some(dir),
-        ["config", "--add", "remote.origin.fetch", exclude.as_str()],
-        None,
-    )
-    .await?;
+    // `--replace-all` above removed the negative refspecs of the last sync,
+    // so a pattern deleted from the settings stops applying here.
+    let archive_refs = format!("{ARCHIVE_REF_PREFIX}*");
+    for pattern in std::iter::once(&archive_refs).chain(exclude) {
+        let refspec = format!("^{pattern}");
+        git.run(
+            Some(dir),
+            ["config", "--add", "remote.origin.fetch", refspec.as_str()],
+            None,
+        )
+        .await?;
+    }
     Ok(())
 }
 

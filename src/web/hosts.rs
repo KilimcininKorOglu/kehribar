@@ -13,7 +13,7 @@ use super::repos::{NoticeQuery, PageContext};
 use crate::db::hosts::{self, Host, HostInput, Provider};
 use crate::db::unix_now;
 use crate::error::AppError;
-use crate::repo_url;
+use crate::{ref_filter, repo_url};
 
 /// The values of the shared form (`host_form.html`) and where it posts to.
 #[derive(Debug, Clone)]
@@ -26,6 +26,8 @@ pub struct HostFields {
     pub provider: Provider,
     pub api_base_url: String,
     pub username: String,
+    /// Ref patterns, one per line.
+    pub ref_exclude: String,
 }
 
 impl HostFields {
@@ -38,6 +40,7 @@ impl HostFields {
             provider: Provider::Generic,
             api_base_url: String::new(),
             username: String::new(),
+            ref_exclude: String::new(),
         }
     }
 
@@ -50,6 +53,7 @@ impl HostFields {
             provider: host.provider,
             api_base_url: host.api_base_url.clone().unwrap_or_default(),
             username: host.username.clone().unwrap_or_default(),
+            ref_exclude: host.ref_exclude.clone().unwrap_or_default(),
         }
     }
 
@@ -60,6 +64,7 @@ impl HostFields {
             provider: Provider::parse(&form.provider).unwrap_or(self.provider),
             api_base_url: form.api_base_url.clone().unwrap_or_default(),
             username: form.username.clone().unwrap_or_default(),
+            ref_exclude: form.ref_exclude.clone().unwrap_or_default(),
             ..self
         }
     }
@@ -100,6 +105,7 @@ pub struct HostForm {
     username: Option<String>,
     token: Option<String>,
     clear_token: Option<String>,
+    ref_exclude: Option<String>,
 }
 
 /// A form that passed validation, with the values to store.
@@ -109,6 +115,7 @@ struct ValidHost {
     api_base_url: Option<String>,
     username: Option<String>,
     token_enc: Option<Vec<u8>>,
+    ref_exclude: Option<String>,
 }
 
 impl ValidHost {
@@ -138,12 +145,16 @@ fn validate(
         Ok(url) => url,
         Err(err) => return Ok(Err(err.message_key())),
     };
+    let Ok(ref_exclude) = ref_filter::normalize(form.ref_exclude.as_deref().unwrap_or("")) else {
+        return Ok(Err("refs.invalid"));
+    };
     Ok(Ok(ValidHost {
         host,
         provider,
         api_base_url,
         username: optional_text(form.username.as_deref()).map(str::to_owned),
         token_enc: encrypt_token(&ctx.state.cipher, form.token.as_deref())?,
+        ref_exclude,
     }))
 }
 
@@ -203,13 +214,14 @@ pub async fn create(ctx: PageContext, Form(form): Form<HostForm>) -> Result<Resp
         Ok(valid) => valid,
         Err(key) => return list_page(&ctx, fields, None, Some(key)).await,
     };
-    match hosts::insert(&ctx.state.pool, &valid.input(), unix_now()).await {
-        Ok(_) => {}
+    let id = match hosts::insert(&ctx.state.pool, &valid.input(), unix_now()).await {
+        Ok(id) => id,
         Err(err) if is_unique_violation(&err) => {
             return list_page(&ctx, fields, None, Some("hosts.exists")).await;
         }
         Err(err) => return Err(err.into()),
-    }
+    };
+    hosts::set_ref_exclude(&ctx.state.pool, id, valid.ref_exclude.as_deref()).await?;
     tracing::info!(host = %valid.host, "host added");
     Ok(Redirect::to("/hosts?notice=saved").into_response())
 }
@@ -260,6 +272,7 @@ pub async fn update(
         }
         Err(err) => return Err(err.into()),
     }
+    hosts::set_ref_exclude(&ctx.state.pool, id, valid.ref_exclude.as_deref()).await?;
     // A new token wins over the clear box.
     if valid.token_enc.is_none() && is_checked(form.clear_token.as_deref()) {
         hosts::clear_token(&ctx.state.pool, id).await?;

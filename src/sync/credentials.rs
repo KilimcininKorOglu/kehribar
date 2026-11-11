@@ -119,6 +119,7 @@ mod tests {
             default_branch: None,
             has_wiki: false,
             created_at: 0,
+            ref_exclude: None,
         }
     }
 
@@ -132,6 +133,7 @@ mod tests {
             token_enc: token.map(|t| cipher().encrypt(t).unwrap()),
             created_at: 0,
             updated_at: 0,
+            ref_exclude: None,
         }
     }
 

@@ -182,6 +182,13 @@ invalid_kind = "Listeden bir tür seçin."
 invalid_name = "Ad yalnız harf, rakam, '.', '-', '_' ve '~' içerebilir. '/' yalnız GitLab gruplarında kullanılabilir."
 exists = "Bu kaynak zaten ekli."
 
+[refs]
+exclude = "Arşive alınmayacak ref'ler"
+exclude_host_help = "İsteğe bağlı. Her satıra bir desen yazın, örneğin refs/pull/*. Bu sunucudaki repolarda eşleşen ref'ler artık çekilmez. Arşivde zaten bulunan ref'ler silinmez."
+exclude_repo_help = "İsteğe bağlı. Her satıra bir desen yazın, örneğin refs/pull/*. Eşleşen ref'ler artık çekilmez. Arşivde zaten bulunan ref'ler silinmez."
+from_host = "Sunucu ayarlarındaki desenler de uygulanır:"
+invalid = "Ref desenlerinden biri geçersiz. Her desen refs/ ile başlamalı ve en fazla bir * içermeli. Boşluk ve ^ : ? [ \\ ~ karakterleri kullanılamaz, refs/git-archive/ altı da dışlanamaz."
+
 [cred]
 title = "Erişim"
 source_repo = "Bu repo kendi token'ını kullanıyor."

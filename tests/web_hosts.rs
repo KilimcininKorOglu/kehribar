@@ -181,6 +181,59 @@ async fn repository_access_follows_the_host_and_its_own_token() {
 }
 
 #[tokio::test]
+async fn ref_patterns_are_stored_for_hosts_and_repositories() {
+    let t = TestApp::new().await;
+    let form = format!("{HOST_FORM}&ref_exclude=refs%2Fpull%2F*%0D%0A%0D%0Arefs%2Fpull%2F*");
+    assert_eq!(
+        t.post("/hosts", &form).await.status(),
+        StatusCode::SEE_OTHER
+    );
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.ref_exclude.as_deref(), Some("refs/pull/*"));
+    assert!(
+        body_text(t.get("/hosts/1").await)
+            .await
+            .contains(">refs/pull/*</textarea>")
+    );
+
+    t.post("/repos", "url=https%3A%2F%2Fgithub.com%2Fa%2Fb")
+        .await;
+    let response = t
+        .post("/repos/1/settings", "ref_exclude=refs%2Fkeep-around%2F*")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(repo.ref_exclude.as_deref(), Some("refs/keep-around/*"));
+    let page = body_text(t.get("/repos/1").await).await;
+    assert!(page.contains("Sunucu ayarlarındaki desenler de uygulanır: <code>refs/pull/*</code>"));
+
+    // An invalid pattern is shown again with the error and nothing changes.
+    let bad = t
+        .post("/repos/1/settings", "ref_exclude=refs%2Fa%2F*%2F*")
+        .await;
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = body_text(bad).await;
+    assert!(page.contains("Ref desenlerinden biri geçersiz."));
+    assert!(page.contains(">refs/a/*/*</textarea>"));
+    let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(repo.ref_exclude.as_deref(), Some("refs/keep-around/*"));
+
+    let bad_host = t
+        .post(
+            "/hosts/1",
+            "host=github.com&provider=github&ref_exclude=pull%2F*",
+        )
+        .await;
+    assert_eq!(bad_host.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // An empty field removes the patterns.
+    t.post("/hosts/1", "host=github.com&provider=github&ref_exclude=")
+        .await;
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.ref_exclude, None);
+}
+
+#[tokio::test]
 async fn interval_settings_do_not_touch_the_credentials() {
     let t = TestApp::new().await;
     t.post(

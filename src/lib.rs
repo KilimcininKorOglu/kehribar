@@ -12,6 +12,7 @@ pub mod error;
 pub mod git;
 pub mod i18n;
 pub mod providers;
+pub mod ref_filter;
 pub mod repo_url;
 pub mod settings;
 pub mod sync;

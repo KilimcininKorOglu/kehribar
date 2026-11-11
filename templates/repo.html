@@ -91,6 +91,12 @@
         <input type="checkbox" name="wiki" value="1"{% if repo.wiki_enabled %} checked{% endif %}>
         <span>{{ layout.t("repo_new.wiki") }}</span>
       </label>
+      <label class="field">
+        <span>{{ layout.t("refs.exclude") }}</span>
+        <textarea name="ref_exclude" rows="3" spellcheck="false" autocomplete="off" placeholder="refs/pull/*">{{ ref_exclude }}</textarea>
+        <small class="muted">{{ layout.t("refs.exclude_repo_help") }}</small>
+        {% if let Some(patterns) = host_ref_exclude() %}<small class="muted">{{ layout.t("refs.from_host") }} <code>{{ patterns }}</code></small>{% endif %}
+      </label>
       <div class="actions"><button class="btn" type="submit">{{ layout.t("form.save") }}</button></div>
     </form>
   </section>

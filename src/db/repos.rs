@@ -39,6 +39,8 @@ pub struct Repo {
     pub default_branch: Option<String>,
     pub has_wiki: bool,
     pub created_at: i64,
+    /// Ref patterns left out of this repository's fetches, besides the host's.
+    pub ref_exclude: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,9 +58,11 @@ pub struct NewRepo<'a> {
 
 /// The per-repository sync settings the user can edit.
 #[derive(Debug, Clone, Copy)]
-pub struct RepoSettings {
+pub struct RepoSettings<'a> {
     pub interval_minutes: Option<i64>,
     pub wiki_enabled: bool,
+    /// Normalized patterns, see [`crate::ref_filter::normalize`].
+    pub ref_exclude: Option<&'a str>,
 }
 
 /// The state written when a sync finishes.
@@ -79,8 +83,8 @@ macro_rules! select_repos {
         concat!(
             "SELECT id, url, host, owner, name, source_id, username, token_enc, \
              interval_minutes, wiki_enabled, status, last_sync_at, last_success_at, \
-             next_sync_at, last_error, size_bytes, default_branch, has_wiki, created_at \
-             FROM repos ",
+             next_sync_at, last_error, size_bytes, default_branch, has_wiki, created_at, \
+             ref_exclude FROM repos ",
             $tail
         )
     };
@@ -201,15 +205,17 @@ pub async fn schedule_now(pool: &SqlitePool, id: i64, now: i64) -> sqlx::Result<
 pub async fn update_settings(
     pool: &SqlitePool,
     id: i64,
-    settings: RepoSettings,
+    settings: RepoSettings<'_>,
 ) -> sqlx::Result<bool> {
-    let result =
-        sqlx::query("UPDATE repos SET interval_minutes = ?, wiki_enabled = ? WHERE id = ?")
-            .bind(settings.interval_minutes)
-            .bind(settings.wiki_enabled)
-            .bind(id)
-            .execute(pool)
-            .await?;
+    let result = sqlx::query(
+        "UPDATE repos SET interval_minutes = ?, wiki_enabled = ?, ref_exclude = ? WHERE id = ?",
+    )
+    .bind(settings.interval_minutes)
+    .bind(settings.wiki_enabled)
+    .bind(settings.ref_exclude)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -397,12 +403,14 @@ mod tests {
         let settings = RepoSettings {
             interval_minutes: Some(30),
             wiki_enabled: false,
+            ref_exclude: Some("refs/pull/*"),
         };
         assert!(update_settings(&pool, id, settings).await.unwrap());
         let stored = get(&pool, id).await.unwrap().unwrap();
         assert_eq!(stored.token_enc.as_deref(), Some(&b"old"[..]));
         assert_eq!(stored.interval_minutes, Some(30));
         assert!(!stored.wiki_enabled);
+        assert_eq!(stored.ref_exclude.as_deref(), Some("refs/pull/*"));
 
         // A credential update without a token keeps the stored one.
         assert!(

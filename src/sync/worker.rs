@@ -10,6 +10,7 @@ use crate::db::sync_runs::{self, RunResult};
 use crate::db::unix_now;
 use crate::git::mirror::{self, SyncReport};
 use crate::git::{Credentials, Git, GitError, GitErrorKind};
+use crate::ref_filter;
 use crate::settings::SyncSettings;
 
 /// The result of the Git work of one sync.
@@ -114,7 +115,19 @@ async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failu
         })?
         .map(|c| credentials::for_git(c, job.is_bitbucket()));
     let credentials = credentials.as_ref();
-    let report = mirror::sync(job.git, &job.repo.url, job.dir, credentials, job.now).await?;
+    let exclude = ref_filter::combine(
+        job.host.and_then(|h| h.ref_exclude.as_deref()),
+        job.repo.ref_exclude.as_deref(),
+    );
+    let report = mirror::sync(
+        job.git,
+        &job.repo.url,
+        job.dir,
+        credentials,
+        job.now,
+        &exclude,
+    )
+    .await?;
     let has_wiki = if job.repo.wiki_enabled {
         mirror_wiki(job, credentials).await?
     } else {

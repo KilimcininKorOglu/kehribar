@@ -21,6 +21,7 @@ fn host(provider: Provider, api: String) -> Host {
         token_enc: None,
         created_at: 0,
         updated_at: 0,
+        ref_exclude: None,
     }
 }
 

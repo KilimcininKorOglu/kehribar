@@ -56,7 +56,12 @@ impl Source {
     }
 
     async fn sync(&self, now: i64) -> mirror::SyncReport {
-        mirror::sync(&git(), &self.url(), &self.archive, None, now)
+        self.sync_excluding(now, &[]).await
+    }
+
+    async fn sync_excluding(&self, now: i64, exclude: &[&str]) -> mirror::SyncReport {
+        let exclude: Vec<String> = exclude.iter().map(|p| (*p).to_owned()).collect();
+        mirror::sync(&git(), &self.url(), &self.archive, None, now, &exclude)
             .await
             .unwrap()
     }
@@ -231,10 +236,38 @@ async fn source_cannot_write_archive_refs() {
 }
 
 #[tokio::test]
+async fn excluded_refs_are_not_fetched_and_archived_ones_stay() {
+    let mut source = Source::new();
+    let first = source.commit("one");
+    source.git(&["update-ref", "refs/pull/1/head", &first]);
+    source.sync(100).await;
+    assert!(source.archive_refs().contains_key("refs/pull/1/head"));
+
+    let second = source.commit("two");
+    source.git(&["update-ref", "refs/pull/2/head", &second]);
+    source.git(&["update-ref", "refs/pull/1/head", &second]);
+    let report = source.sync_excluding(200, &["refs/pull/*"]).await;
+
+    let refs = source.archive_refs();
+    // Branches still arrive; the pull refs neither appear nor move.
+    assert_eq!(refs["refs/heads/main"], second);
+    assert_eq!(report.refs_changed, 1);
+    assert!(!refs.contains_key("refs/pull/2/head"));
+    assert_eq!(refs["refs/pull/1/head"], first);
+    assert_eq!(report.refs_rescued, 0);
+
+    // Without the pattern the pull refs are fetched again.
+    source.sync(300).await;
+    let refs = source.archive_refs();
+    assert_eq!(refs["refs/pull/2/head"], second);
+    assert_eq!(refs["refs/pull/1/head"], second);
+}
+
+#[tokio::test]
 async fn missing_source_fails_as_not_found_and_leaves_no_directory() {
     let source = Source::new();
     let missing = format!("{}-missing", source.url());
-    let err = mirror::sync(&git(), &missing, &source.archive, None, 1)
+    let err = mirror::sync(&git(), &missing, &source.archive, None, 1, &[])
         .await
         .unwrap_err();
     assert_eq!(err.kind, GitErrorKind::NotFound);

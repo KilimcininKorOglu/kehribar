@@ -182,6 +182,13 @@ invalid_kind = "Select a type from the list."
 invalid_name = "Enter a name with letters, digits, '.', '-', '_' or '~'. Only a GitLab group can contain '/'."
 exists = "This source is already in the list."
 
+[refs]
+exclude = "Refs to leave out"
+exclude_host_help = "Optional. One pattern per line, for example refs/pull/*. No repository on this host fetches matching refs any more. Refs already in the archive stay."
+exclude_repo_help = "Optional. One pattern per line, for example refs/pull/*. Matching refs are not fetched any more. Refs already in the archive stay."
+from_host = "The patterns of the host apply too:"
+invalid = "A ref pattern is not valid. Each pattern starts with refs/ and has at most one *. Spaces and the characters ^ : ? [ \\ ~ are not allowed, and refs/git-archive/ cannot be left out."
+
 [cred]
 title = "Access"
 source_repo = "This repository uses its own token."

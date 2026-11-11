@@ -24,6 +24,8 @@ pub struct Host {
     pub token_enc: Option<Vec<u8>>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Ref patterns left out of the fetches of every repository on this host.
+    pub ref_exclude: Option<String>,
 }
 
 /// Values written when a host is created or edited.
@@ -40,8 +42,8 @@ pub struct HostInput<'a> {
 macro_rules! select_hosts {
     ($tail:literal) => {
         concat!(
-            "SELECT id, host, provider, api_base_url, username, token_enc, created_at, updated_at \
-             FROM hosts ",
+            "SELECT id, host, provider, api_base_url, username, token_enc, created_at, updated_at, \
+             ref_exclude FROM hosts ",
             $tail
         )
     };
@@ -83,6 +85,20 @@ pub async fn update(
     .bind(id)
     .execute(pool)
     .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Stores the ref patterns in their normalized form; `None` removes them.
+pub async fn set_ref_exclude(
+    pool: &SqlitePool,
+    id: i64,
+    patterns: Option<&str>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query("UPDATE hosts SET ref_exclude = ? WHERE id = ?")
+        .bind(patterns)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -162,6 +178,18 @@ mod tests {
 
         assert!(clear_token(&pool, id).await.unwrap());
         assert!(get(&pool, id).await.unwrap().unwrap().token_enc.is_none());
+
+        assert!(
+            set_ref_exclude(&pool, id, Some("refs/pull/*"))
+                .await
+                .unwrap()
+        );
+        let host = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(host.ref_exclude.as_deref(), Some("refs/pull/*"));
+        // Editing the host keeps the patterns.
+        assert!(update(&pool, id, &edit, 30).await.unwrap());
+        let host = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(host.ref_exclude.as_deref(), Some("refs/pull/*"));
 
         assert_eq!(list(&pool).await.unwrap().len(), 1);
         assert!(delete(&pool, id).await.unwrap());

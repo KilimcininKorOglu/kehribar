@@ -34,6 +34,11 @@
     <span>{{ layout.t("cred.clear_token") }}</span>
   </label>
   {% endif %}
+  <label class="field">
+    <span>{{ layout.t("refs.exclude") }}</span>
+    <textarea name="ref_exclude" rows="3" spellcheck="false" autocomplete="off" placeholder="refs/pull/*">{{ fields.ref_exclude }}</textarea>
+    <small class="muted">{{ layout.t("refs.exclude_host_help") }}</small>
+  </label>
   <div class="actions">
     <button class="btn btn-primary" type="submit">{% if fields.editing %}{{ layout.t("form.save") }}{% else %}{{ layout.t("hosts.add") }}{% endif %}</button>
     {% if fields.editing %}<a class="btn btn-ghost" href="/hosts">{{ layout.t("form.cancel") }}</a>{% endif %}
