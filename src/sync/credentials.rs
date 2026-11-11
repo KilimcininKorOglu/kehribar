@@ -63,6 +63,17 @@ pub fn for_git(credentials: Credentials, bitbucket: bool) -> Credentials {
     }
 }
 
+/// The private SSH key of the host, which fetches its `ssh://` repositories.
+pub fn ssh_key(cipher: &Cipher, host: Option<&Host>) -> Result<Option<String>, String> {
+    let Some(key) = host.and_then(|h| h.ssh_key_enc.as_deref()) else {
+        return Ok(None);
+    };
+    cipher
+        .decrypt(key)
+        .map(Some)
+        .map_err(|err| format!("cannot decrypt the stored SSH key: {err}"))
+}
+
 /// The default credentials of a host, which also call its API.
 pub fn for_host(cipher: &Cipher, host: &Host) -> Result<Option<Credentials>, String> {
     decrypt(cipher, &host.token_enc, &host.username)
@@ -140,6 +151,8 @@ mod tests {
             ref_exclude: None,
             max_concurrency: None,
             api_blocked_until: None,
+            ssh_key_enc: None,
+            ssh_public_key: None,
         }
     }
 

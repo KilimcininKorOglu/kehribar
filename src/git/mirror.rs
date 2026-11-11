@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::command::{Credentials, Git, GitError, GitErrorKind};
+use super::command::{Access, Git, GitError, GitErrorKind};
 
 /// Prefix of the refs that this archive creates. The fetch refspec excludes
 /// it, so the source can neither overwrite nor delete these refs.
@@ -43,12 +43,12 @@ pub async fn sync(
     git: &Git,
     url: &str,
     dir: &Path,
-    credentials: Option<&Credentials>,
+    access: Option<&Access>,
     now: i64,
     exclude: &[String],
 ) -> Result<SyncReport, GitError> {
     // Ask the source first: a missing repository leaves no directory behind.
-    let remote_head = remote_head(git, url, credentials).await?;
+    let remote_head = remote_head(git, url, access).await?;
     prepare_repository(git, url, dir, exclude).await?;
     remove_stale_locks(dir).await?;
 
@@ -56,7 +56,7 @@ pub async fn sync(
     git.run(
         Some(dir),
         ["fetch", "--quiet", "--no-write-fetch-head", "origin"],
-        credentials,
+        access,
     )
     .await?;
     let after = list_refs(git, dir).await?;
@@ -76,10 +76,10 @@ pub async fn sync_wiki(
     git: &Git,
     wiki_url: &str,
     dir: &Path,
-    credentials: Option<&Credentials>,
+    access: Option<&Access>,
     now: i64,
 ) -> Result<Option<SyncReport>, GitError> {
-    match sync(git, wiki_url, dir, credentials, now, &[]).await {
+    match sync(git, wiki_url, dir, access, now, &[]).await {
         Ok(report) => Ok(Some(report)),
         Err(err) if err.kind == GitErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
@@ -114,13 +114,13 @@ pub fn wiki_dir(dir: &Path) -> PathBuf {
 async fn remote_head(
     git: &Git,
     url: &str,
-    credentials: Option<&Credentials>,
+    access: Option<&Access>,
 ) -> Result<Option<String>, GitError> {
     let out = git
         .run(
             None,
             ["ls-remote", "--symref", "--end-of-options", url, "HEAD"],
-            credentials,
+            access,
         )
         .await?;
     Ok(String::from_utf8_lossy(&out).lines().find_map(|line| {

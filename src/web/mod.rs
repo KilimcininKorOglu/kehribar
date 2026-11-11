@@ -6,6 +6,7 @@ pub mod form;
 pub mod format;
 pub mod git_http;
 pub mod highlight;
+pub mod host_ssh;
 pub mod hosts;
 pub mod markdown;
 pub mod pages;
@@ -117,6 +118,13 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/{id}", get(hosts::show).post(hosts::update))
         .route("/hosts/{id}/delete", post(hosts::delete))
+        .route("/hosts/{id}/ssh/generate", post(host_ssh::generate))
+        .route("/hosts/{id}/ssh/key", post(host_ssh::paste))
+        .route("/hosts/{id}/ssh/delete", post(host_ssh::remove))
+        .route(
+            "/hosts/{id}/ssh/forget-host-keys",
+            post(host_ssh::forget_host_keys),
+        )
         .route("/sources", get(sources::list).post(sources::create))
         .route("/sources/{id}", post(sources::update))
         .route("/sources/{id}/scan", post(sources::scan))

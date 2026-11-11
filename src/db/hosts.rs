@@ -35,6 +35,10 @@ pub struct Host {
     /// No API request goes to the host before this time, because it
     /// answered with a rate limit.
     pub api_blocked_until: Option<i64>,
+    /// The encrypted private SSH key for `ssh://` fetches.
+    pub ssh_key_enc: Option<Vec<u8>>,
+    /// The public half of the SSH key, shown to add it at the server.
+    pub ssh_public_key: Option<String>,
 }
 
 impl Host {
@@ -59,7 +63,8 @@ macro_rules! select_hosts {
     ($tail:literal) => {
         concat!(
             "SELECT id, host, provider, api_base_url, username, token_enc, created_at, updated_at, \
-             ref_exclude, max_concurrency, api_blocked_until FROM hosts ",
+             ref_exclude, max_concurrency, api_blocked_until, ssh_key_enc, ssh_public_key \
+             FROM hosts ",
             $tail
         )
     };
@@ -126,6 +131,21 @@ pub async fn set_max_concurrency(
 ) -> sqlx::Result<bool> {
     let result = sqlx::query("UPDATE hosts SET max_concurrency = ? WHERE id = ?")
         .bind(limit)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Stores the encrypted private key and the public key; `None` removes both.
+pub async fn set_ssh_key(
+    pool: &SqlitePool,
+    id: i64,
+    key: Option<(&[u8], &str)>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query("UPDATE hosts SET ssh_key_enc = ?, ssh_public_key = ? WHERE id = ?")
+        .bind(key.map(|(private, _)| private))
+        .bind(key.map(|(_, public)| public))
         .bind(id)
         .execute(pool)
         .await?;

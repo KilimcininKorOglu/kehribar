@@ -5,7 +5,7 @@
 mod common;
 
 use axum::http::{StatusCode, header};
-use common::{TestApp, body_text, header_value};
+use common::{TestApp, body_text, header_value, urlencode};
 use git_archive::db::hosts::{self, Provider};
 use git_archive::db::repos;
 
@@ -273,6 +273,100 @@ async fn the_host_sync_limit_is_stored_and_checked() {
     .await;
     let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
     assert_eq!(host.max_concurrency, None);
+}
+
+#[tokio::test]
+async fn ssh_keys_are_generated_pasted_and_deleted_and_only_the_public_key_shows() {
+    let t = TestApp::new().await;
+    t.post("/hosts", HOST_FORM).await;
+
+    let generated = t.post("/hosts/1/ssh/generate", "").await;
+    assert_eq!(generated.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&generated, header::LOCATION),
+        "/hosts/1?notice=ssh_saved"
+    );
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    let public = host.ssh_public_key.clone().unwrap();
+    assert!(public.starts_with("ssh-ed25519 "), "{public}");
+    assert!(public.ends_with(" git-archive@github.com"));
+    let private = decrypt(&t, host.ssh_key_enc.clone()).unwrap();
+    assert!(private.contains("OPENSSH PRIVATE KEY"));
+    let stored = host.ssh_key_enc.unwrap();
+    assert!(!stored.windows(11).any(|w| w == b"PRIVATE KEY"));
+
+    let page = body_text(t.get("/hosts/1?notice=ssh_saved").await).await;
+    assert!(page.contains("SSH anahtarı kaydedildi."));
+    assert!(page.contains(&public));
+    assert!(!page.contains("PRIVATE KEY-----\n"));
+    assert!(page.contains("Henüz kayıtlı host key yok."));
+
+    let removed = t.post("/hosts/1/ssh/delete", "").await;
+    assert_eq!(
+        header_value(&removed, header::LOCATION),
+        "/hosts/1?notice=ssh_removed"
+    );
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert!(host.ssh_key_enc.is_none() && host.ssh_public_key.is_none());
+
+    // A pasted key with CRLF line ends is stored with its public line.
+    let crlf = private.replace('\n', "\r\n");
+    let pasted = t
+        .post(
+            "/hosts/1/ssh/key",
+            &format!("private_key={}", urlencode(&crlf)),
+        )
+        .await;
+    assert_eq!(pasted.status(), StatusCode::SEE_OTHER);
+    let host = hosts::get(&t.state.pool, 1).await.unwrap().unwrap();
+    assert_eq!(host.ssh_public_key.as_deref(), Some(public.as_str()));
+    assert_eq!(decrypt(&t, host.ssh_key_enc).unwrap(), private.trim());
+
+    for (body, message) in [
+        ("private_key=+", "Bir private key yapıştırın."),
+        (
+            "private_key=not-a-key",
+            "parolası olmayan bir private key değil",
+        ),
+    ] {
+        let response = t.post("/hosts/1/ssh/key", body).await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body_text(response).await.contains(message), "{body}");
+    }
+    assert_eq!(
+        t.post("/hosts/9/ssh/generate", "").await.status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn stored_host_keys_are_listed_and_forgotten_on_the_host_page() {
+    let t = TestApp::new().await;
+    t.post("/hosts", HOST_FORM).await;
+    let known_hosts = t.state.config.known_hosts();
+    std::fs::create_dir_all(known_hosts.parent().unwrap()).unwrap();
+    std::fs::write(
+        &known_hosts,
+        "[github.com]:2222 ssh-ed25519 AAAAhostkey1\ngitlab.com ssh-ed25519 AAAAother\n",
+    )
+    .unwrap();
+
+    let page = body_text(t.get("/hosts/1").await).await;
+    assert!(page.contains("[github.com]:2222 ssh-ed25519 AAAAhostkey1"));
+    assert!(!page.contains("AAAAother"));
+
+    let forgotten = t.post("/hosts/1/ssh/forget-host-keys", "").await;
+    assert_eq!(
+        header_value(&forgotten, header::LOCATION),
+        "/hosts/1?notice=host_key_forgotten"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&known_hosts).unwrap(),
+        "gitlab.com ssh-ed25519 AAAAother\n"
+    );
+    let page = body_text(t.get("/hosts/1?notice=host_key_forgotten").await).await;
+    assert!(page.contains("Host key&#39;ler unutuldu."));
+    assert!(!page.contains("AAAAhostkey1"));
 }
 
 #[tokio::test]

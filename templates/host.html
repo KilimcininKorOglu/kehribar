@@ -4,11 +4,52 @@
 
 {% block content %}
 <nav class="breadcrumb" aria-label="breadcrumb"><a href="/hosts">{{ layout.t("hosts.title") }}</a> / {{ host.host }}</nav>
+{% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
+{% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
 <div class="grid-2">
   <section class="card">
     <h1>{{ layout.t("hosts.edit") }}</h1>
-    {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
     {% include "host_form.html" %}
+  </section>
+
+  <section class="card stack" id="ssh">
+    <h2>{{ layout.t("hosts.ssh_title") }}</h2>
+    <p class="muted small">{{ layout.t("hosts.ssh_help") }}</p>
+    {% if let Some(public) = host.ssh_public_key %}
+    <p class="small">{{ layout.t("hosts.ssh_public_help") }}</p>
+    <pre class="clone-command"><code>{{ public }}</code></pre>
+    <form method="post" action="/hosts/{{ host.id }}/ssh/delete">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("hosts.ssh_delete") }}</button></div>
+    </form>
+    {% else %}
+    <form method="post" action="/hosts/{{ host.id }}/ssh/generate">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <div class="actions"><button class="btn btn-primary" type="submit">{{ layout.t("hosts.ssh_generate") }}</button></div>
+    </form>
+    <form method="post" action="/hosts/{{ host.id }}/ssh/key" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <label class="field">
+        <span>{{ layout.t("hosts.ssh_private") }}</span>
+        <textarea name="private_key" rows="5" required spellcheck="false" autocomplete="off"></textarea>
+        <small class="muted">{{ layout.t("hosts.ssh_private_help") }}</small>
+      </label>
+      <div class="actions"><button class="btn" type="submit">{{ layout.t("hosts.ssh_store") }}</button></div>
+    </form>
+    {% endif %}
+
+    <h3>{{ layout.t("hosts.host_keys") }}</h3>
+    {% if known_keys.is_empty() %}
+    <p class="muted small">{{ layout.t("hosts.host_keys_none") }}</p>
+    {% else %}
+    <p class="muted small">{{ layout.t("hosts.host_keys_help") }}</p>
+    <pre class="clone-command"><code>{% for key in known_keys %}{{ key }}
+{% endfor %}</code></pre>
+    <form method="post" action="/hosts/{{ host.id }}/ssh/forget-host-keys">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+      <div class="actions"><button class="btn btn-danger" type="submit">{{ layout.t("hosts.host_keys_forget") }}</button></div>
+    </form>
+    {% endif %}
   </section>
 
   <section class="card danger-zone">

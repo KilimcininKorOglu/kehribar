@@ -13,7 +13,7 @@
     <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
     <label class="field">
       <span>{{ layout.t("repo_new.url") }}</span>
-      <input name="url" type="url" required autofocus value="{{ url }}" placeholder="https://github.com/owner/name" spellcheck="false" autocomplete="off">
+      <input name="url" type="text" inputmode="url" required autofocus value="{{ url }}" placeholder="https://github.com/owner/name" spellcheck="false" autocomplete="off">
       <small class="muted">{{ layout.t("repo_new.url_help") }}</small>
     </label>
     <label class="field">

@@ -330,7 +330,7 @@ async fn repositories_on_another_host_are_reported_not_added() {
         json!([
             repo("https://github.com/octo/app.git", false),
             repo("https://mirror.example/octo/other.git", false),
-            repo("ssh://github.com/octo/ssh.git", false)
+            repo("git://github.com/octo/plain.git", false)
         ]),
     )
     .await;

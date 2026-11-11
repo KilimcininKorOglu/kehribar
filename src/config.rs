@@ -197,6 +197,16 @@ impl fmt::Debug for Config {
 }
 
 impl Config {
+    /// Temporary files: bundles before their upload, SSH keys during a fetch.
+    pub fn tmp_dir(&self) -> PathBuf {
+        self.data_dir.join("tmp")
+    }
+
+    /// The SSH host keys stored on the first connection to each server.
+    pub fn known_hosts(&self) -> PathBuf {
+        self.data_dir.join("ssh").join("known_hosts")
+    }
+
     /// Reads the configuration from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_lookup(|name| std::env::var(name).ok())

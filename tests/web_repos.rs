@@ -16,12 +16,12 @@ const URL: &str = "https%3A%2F%2Fgithub.com%2Frust-lang%2Frust.git";
 async fn invalid_url_is_rejected_with_a_message() {
     let t = TestApp::new().await;
     let response = t
-        .post("/repos", "url=ssh%3A%2F%2Fgithub.com%2Fa%2Fb&wiki=1")
+        .post("/repos", "url=git%3A%2F%2Fgithub.com%2Fa%2Fb&wiki=1")
         .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let html = body_text(response).await;
     assert!(
-        html.contains("Yalnız http ve https ile başlayan URL&#39;ler kabul edilir."),
+        html.contains("Yalnız http, https ve ssh ile başlayan URL&#39;ler kabul edilir."),
         "{html}"
     );
     assert!(repos::list(&t.state.pool, None).await.unwrap().is_empty());

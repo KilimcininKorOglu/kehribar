@@ -23,8 +23,10 @@ pub struct RepoLocation {
 pub enum UrlError {
     #[error("not a valid URL")]
     Invalid,
-    #[error("only http and https URLs are supported")]
+    #[error("only http, https and ssh URLs are supported")]
     Scheme,
+    #[error("only http and https API URLs are supported")]
+    ApiScheme,
     #[error("credentials belong in the token fields, not in the URL")]
     Credentials,
     #[error("the URL must not have a query or a fragment")]
@@ -41,6 +43,7 @@ impl UrlError {
         match self {
             Self::Invalid => "url.invalid",
             Self::Scheme => "url.scheme",
+            Self::ApiScheme => "url.api_scheme",
             Self::Credentials => "url.credentials",
             Self::QueryOrFragment => "url.query",
             Self::Path => "url.path",
@@ -67,12 +70,20 @@ pub fn settings_host(host: &str) -> &str {
     }
 }
 
+/// Parses an `http`, `https` or `ssh` repository URL, or the SSH short
+/// form `user@host:owner/name`. An SSH URL keeps its user and port for the
+/// fetch, but its host is the bare name, so it uses the settings and the
+/// archive path of that host. The short form is fetched as it was given,
+/// because its path is relative to the home folder of the SSH user, which
+/// an `ssh://` URL cannot say.
 pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
-    let url = Url::parse(input.trim()).map_err(|_| UrlError::Invalid)?;
+    let input = input.trim();
+    let url = Url::parse(&scp_to_ssh(input)).map_err(|_| UrlError::Invalid)?;
     check_parts(&url)?;
-    let host = host_with_port(&url).ok_or(UrlError::Invalid)?;
+    let ssh = is_ssh_url(&url);
+    let host = archive_host(&url, ssh).ok_or(UrlError::Invalid)?;
     let segments = path_segments(&url)?;
-    if host == GIST_HOST {
+    if host == GIST_HOST && !ssh {
         return parse_gist(url.scheme(), &segments);
     }
     let (last, owners) = segments.split_last().ok_or(UrlError::Path)?;
@@ -83,11 +94,72 @@ pub fn parse(input: &str) -> Result<RepoLocation, UrlError> {
         return Err(UrlError::Path);
     }
     Ok(RepoLocation {
-        url: format!("{}://{host}/{}", url.scheme(), segments.join("/")),
+        url: fetch_url(input, &url, &host, &segments),
         host,
         owner: owners.join("/"),
         name: name.to_owned(),
     })
+}
+
+/// The host the repository is archived under: the bare name for SSH, the
+/// name with a non-default port for HTTP(S).
+fn archive_host(url: &Url, ssh: bool) -> Option<String> {
+    if ssh {
+        url.host_str().map(str::to_ascii_lowercase)
+    } else {
+        host_with_port(url)
+    }
+}
+
+/// Whether a stored repository URL is fetched over SSH.
+pub fn is_ssh(url: &str) -> bool {
+    url.starts_with("ssh://") || is_scp(url)
+}
+
+fn is_ssh_url(url: &Url) -> bool {
+    url.scheme() == "ssh"
+}
+
+/// The URL a fetch uses: the SSH short form as given, else the URL rebuilt
+/// from its checked parts.
+fn fetch_url(input: &str, url: &Url, host: &str, segments: &[&str]) -> String {
+    if is_scp(input) {
+        input.to_owned()
+    } else {
+        format!("{}/{}", fetch_origin(url, host), segments.join("/"))
+    }
+}
+
+/// `scheme://host[:port]` for HTTP(S), `ssh://[user@]host[:port]` for SSH.
+fn fetch_origin(url: &Url, host: &str) -> String {
+    if !is_ssh_url(url) {
+        return format!("{}://{host}", url.scheme());
+    }
+    let user = match url.username() {
+        "" => String::new(),
+        name => format!("{name}@"),
+    };
+    let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+    format!("ssh://{user}{host}{port}")
+}
+
+/// Whether `input` has the scp-like form `user@host:path` Git accepts.
+fn is_scp(input: &str) -> bool {
+    !input.contains("://")
+        && input
+            .split_once(':')
+            .is_some_and(|(user_host, _)| user_host.contains('@') && !user_host.contains('/'))
+}
+
+/// `user@host:path` as an `ssh://` URL, to check its parts. Anything else,
+/// a URL with a scheme included, stays as it is.
+fn scp_to_ssh(input: &str) -> String {
+    match input.split_once(':') {
+        Some((user_host, path)) if is_scp(input) => {
+            format!("ssh://{user_host}/{}", path.trim_start_matches('/'))
+        }
+        _ => input.to_owned(),
+    }
 }
 
 /// `https://gist.github.com/<user>/<id>`, the address of a gist page. The
@@ -145,6 +217,9 @@ pub fn parse_api_url(input: &str) -> Result<Option<String>, UrlError> {
         return Ok(None);
     }
     let url = Url::parse(input).map_err(|_| UrlError::Invalid)?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(UrlError::ApiScheme);
+    }
     check_parts(&url)?;
     Ok(Some(url.as_str().trim_end_matches('/').to_owned()))
 }
@@ -166,12 +241,14 @@ pub fn parse_owner(input: &str, nested: bool) -> Option<String> {
     valid.then(|| name.to_owned())
 }
 
-/// Rejects every URL part other than scheme, host, port and path.
+/// Rejects every URL part other than scheme, host, port and path. An SSH
+/// URL may name the user, which is not a secret.
 fn check_parts(url: &Url) -> Result<(), UrlError> {
-    if !matches!(url.scheme(), "http" | "https") {
+    if !matches!(url.scheme(), "http" | "https" | "ssh") {
         return Err(UrlError::Scheme);
     }
-    if !url.username().is_empty() || url.password().is_some() {
+    let user_allowed = is_ssh_url(url) && url.username().bytes().all(is_name_byte);
+    if (!url.username().is_empty() && !user_allowed) || url.password().is_some() {
         return Err(UrlError::Credentials);
     }
     if url.query().is_some() || url.fragment().is_some() {
@@ -268,9 +345,11 @@ mod tests {
     fn rejects_unsafe_or_unsupported_urls() {
         let cases = [
             ("not a url", UrlError::Invalid),
-            ("git@github.com:a/b.git", UrlError::Invalid),
-            ("ssh://github.com/a/b", UrlError::Scheme),
+            ("github.com:a/b.git", UrlError::Scheme),
+            ("git://github.com/a/b", UrlError::Scheme),
             ("file:///etc/passwd", UrlError::Scheme),
+            ("ssh://git:secret@github.com/a/b", UrlError::Credentials),
+            ("ssh://git@github.com/a/../../b", UrlError::Path),
             ("https://user:token@github.com/a/b", UrlError::Credentials),
             ("https://github.com/a/b?x=1", UrlError::QueryOrFragment),
             ("https://github.com/a/b#readme", UrlError::QueryOrFragment),
@@ -305,6 +384,48 @@ mod tests {
         assert_eq!(parse("https://gist.github.com/a/b/c"), Err(UrlError::Path));
         assert_eq!(settings_host("gist.github.com"), "github.com");
         assert_eq!(settings_host("gitlab.com"), "gitlab.com");
+    }
+
+    #[test]
+    fn ssh_urls_keep_user_and_port_but_archive_under_the_bare_host() {
+        assert_eq!(
+            parse("ssh://git@GitHub.com/rust-lang/rust.git/").unwrap(),
+            location(
+                "ssh://git@github.com/rust-lang/rust.git",
+                "github.com",
+                "rust-lang",
+                "rust",
+            )
+        );
+        // The short form is fetched as given: its path starts in the home
+        // folder of the SSH user, which an ssh:// URL cannot express.
+        let short = parse(" git@GitHub.com:rust-lang/rust.git ").unwrap();
+        assert_eq!(
+            short,
+            location(
+                "git@GitHub.com:rust-lang/rust.git",
+                "github.com",
+                "rust-lang",
+                "rust"
+            )
+        );
+        assert!(is_ssh(&short.url));
+        assert!(parse("git@host:/a b/c").is_err());
+        assert_eq!(
+            parse("ssh://git@git.example:2222/team/app").unwrap(),
+            location(
+                "ssh://git@git.example:2222/team/app",
+                "git.example",
+                "team",
+                "app"
+            )
+        );
+        // SourceHut names its users with a tilde.
+        let srht = parse("git@git.sr.ht:~alice/tools").unwrap();
+        assert_eq!(srht.url, "git@git.sr.ht:~alice/tools");
+        assert_eq!(srht.owner, "~alice");
+        assert!(is_ssh(&srht.url));
+        assert!(!is_ssh("https://github.com/a/b"));
     }
 
     #[test]
@@ -376,7 +497,8 @@ mod tests {
             parse_api_url("https://gitlab.example.com/api/v4/").unwrap(),
             Some("https://gitlab.example.com/api/v4".to_owned())
         );
-        assert_eq!(parse_api_url("ftp://x/api"), Err(UrlError::Scheme));
+        assert_eq!(parse_api_url("ftp://x/api"), Err(UrlError::ApiScheme));
+        assert_eq!(parse_api_url("ssh://x/api"), Err(UrlError::ApiScheme));
         assert_eq!(
             parse_api_url("https://t:k@x/api"),
             Err(UrlError::Credentials)

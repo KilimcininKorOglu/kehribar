@@ -18,6 +18,7 @@ Pull requests, issues and Git LFS objects are not archived.
 - Watched sources: scheduled scans add the repositories that appear later. Forks are optional per source.
 - A global sync interval, a per-repository interval and a "sync now" button.
 - Default tokens per host, and a per-repository token that overrides the host token. Tokens are stored encrypted (XChaCha20-Poly1305).
+- Fetching over SSH with a generated or pasted key per host, and a stored host key that a fetch checks every time.
 - Browsing: branches, tags, rewritten history, paged commit history with message search, commit detail with diff, file tree, files with syntax highlighting, rendered README, blame, raw files.
 - Restore: read-only `git clone` over smart HTTP, and ZIP or tar.gz download of any revision.
 - Ref exclude patterns per host and per repository, for example `refs/pull/*`.
@@ -45,9 +46,10 @@ The data lives in the named volume `git-archive-data`, mounted at `/data`:
 /data/git-archive.db                         SQLite database
 /data/repos/<host>/<owner>/<name>.git        bare mirror
 /data/repos/<host>/<owner>/<name>.wiki.git   wiki mirror, when there is one
+/data/ssh/known_hosts                        SSH host keys of the servers
 ```
 
-Keep the secret key. Without it the stored tokens cannot be decrypted. The mirrors themselves are plain bare Git repositories and do not need the key.
+Keep the secret key. Without it the stored tokens and SSH keys cannot be decrypted. The mirrors themselves are plain bare Git repositories and do not need the key.
 
 ## Configuration
 
@@ -164,6 +166,14 @@ Tokens with read access are enough:
 The username field may stay empty for GitHub, GitLab, Forgejo, Gitea, Gitee, Azure DevOps and SourceHut.
 
 An Azure DevOps source is an organization (every project) or `organization/project`. Repository URLs keep their `_git` segment for fetching, but the archive path leaves it out: `dev.azure.com/<org>/<project>/<name>`. Disabled Azure DevOps repositories are skipped. A SourceHut source is a user, with or without its `~`. Gitee, Azure DevOps and SourceHut report no archived state, so "skip archived repositories" has no effect on them.
+
+## SSH
+
+A repository URL can also be `ssh://git@host[:port]/owner/name.git` or the short form `git@host:owner/name.git`. The short form is fetched as given, so its path stays relative to the home folder of the SSH user. The archive path is the same as for HTTPS: `<host>/<owner>/<name>`, without the port.
+
+Each host can hold one SSH key. On the host page, generate a new ed25519 key or paste a private key without a passphrase, then add the shown public key to the account on the server or as a read-only deploy key. The private key is stored encrypted with the secret key. During a fetch it is written to a file under `/data/tmp` that only the app user can read, and the file is removed when the fetch ends. Without a key, an SSH fetch uses no identity.
+
+The first connection to a server stores its host key in `/data/ssh/known_hosts`. When the server later shows another key, the fetch stops and the repository changes to "Error" with a message that names the host key. The host page lists the stored host keys of the host on every port. When a change is expected, for example after a server move, "Forget host keys" removes them and the next fetch stores the new key.
 
 ## Importing users and organizations
 

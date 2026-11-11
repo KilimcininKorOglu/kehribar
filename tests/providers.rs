@@ -24,6 +24,8 @@ fn host(provider: Provider, api: String) -> Host {
         ref_exclude: None,
         max_concurrency: None,
         api_blocked_until: None,
+        ssh_key_enc: None,
+        ssh_public_key: None,
     }
 }
 

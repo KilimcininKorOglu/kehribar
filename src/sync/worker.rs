@@ -10,7 +10,8 @@ use crate::db::sync_runs::{self, RunOutcome, RunResult};
 use crate::db::unix_now;
 use crate::git::maintenance;
 use crate::git::mirror::{self, SyncReport};
-use crate::git::{Credentials, Git, GitError, GitErrorKind};
+use crate::git::ssh::KeyFile;
+use crate::git::{Access, Git, GitError, GitErrorKind};
 use crate::notify::{self, Change, Event};
 use crate::providers::RATE_LIMIT_WAIT_SECONDS;
 use crate::ref_filter;
@@ -270,35 +271,56 @@ impl Job<'_> {
 }
 
 async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failure> {
-    let credentials = credentials::resolve(&ctx.cipher, job.repo, job.host)
-        .map_err(Failure::error)?
-        .map(|c| credentials::for_git(c, job.is_bitbucket()));
-    let credentials = credentials.as_ref();
+    // The key file must live until the last git command of the sync.
+    let (access, _key_file) = access_for(ctx, job)?;
+    let access = access.as_ref();
     let exclude = ref_filter::combine(
         job.host.and_then(|h| h.ref_exclude.as_deref()),
         job.repo.ref_exclude.as_deref(),
     );
-    let report = mirror::sync(
-        job.git,
-        &job.repo.url,
-        job.dir,
-        credentials,
-        job.now,
-        &exclude,
-    )
-    .await?;
+    let report = mirror::sync(job.git, &job.repo.url, job.dir, access, job.now, &exclude).await?;
     let has_wiki = if job.repo.wiki_enabled {
-        mirror_wiki(job, credentials).await?
+        mirror_wiki(job, access).await?
     } else {
         false
     };
     Ok(Mirrored { report, has_wiki })
 }
 
-async fn mirror_wiki(job: &Job<'_>, credentials: Option<&Credentials>) -> Result<bool, Failure> {
+/// What the fetch proves itself with: for an `ssh://` URL the SSH key of
+/// the host, written to a private file for the time of the sync; else the
+/// repository or host token.
+fn access_for(
+    ctx: &SyncContext,
+    job: &Job<'_>,
+) -> Result<(Option<Access>, Option<KeyFile>), Failure> {
+    if !repo_url::is_ssh(&job.repo.url) {
+        let credentials = credentials::resolve(&ctx.cipher, job.repo, job.host)
+            .map_err(Failure::error)?
+            .map(|c| credentials::for_git(c, job.is_bitbucket()));
+        return Ok((credentials.map(Access::Token), None));
+    }
+    let key_file = credentials::ssh_key(&ctx.cipher, job.host)
+        .map_err(Failure::error)?
+        .map(|key| KeyFile::write(&ctx.config.tmp_dir(), &key))
+        .transpose()
+        .map_err(|err| Failure::error(format!("cannot write the SSH key: {err}")))?;
+    let known_hosts = ctx.config.known_hosts();
+    if let Some(dir) = known_hosts.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|err| Failure::error(format!("cannot create {}: {err}", dir.display())))?;
+    }
+    let access = Access::Ssh {
+        key_file: key_file.as_ref().map(|file| file.path().to_owned()),
+        known_hosts,
+    };
+    Ok((Some(access), key_file))
+}
+
+async fn mirror_wiki(job: &Job<'_>, access: Option<&Access>) -> Result<bool, Failure> {
     let url = mirror::wiki_url(&job.repo.url, job.is_bitbucket());
     let wiki_dir = mirror::wiki_dir(job.dir);
-    let wiki = mirror::sync_wiki(job.git, &url, &wiki_dir, credentials, job.now)
+    let wiki = mirror::sync_wiki(job.git, &url, &wiki_dir, access, job.now)
         .await
         .map_err(|err| {
             if err.kind == GitErrorKind::RateLimited {

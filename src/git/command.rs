@@ -3,7 +3,7 @@
 
 use std::ffi::OsStr;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
 
@@ -38,6 +38,59 @@ impl fmt::Debug for Credentials {
     }
 }
 
+/// How a fetch proves itself to the source server.
+#[derive(Debug, Clone)]
+pub enum Access {
+    /// HTTP(S): a username and a token through the credential helper.
+    Token(Credentials),
+    /// SSH: the private key file, if the host has a key, and the file of
+    /// the known host keys. New hosts are added to it; a changed key fails.
+    Ssh {
+        key_file: Option<PathBuf>,
+        known_hosts: PathBuf,
+    },
+}
+
+impl Access {
+    /// The cause a failure over SSH has, which git's excerpt leaves out.
+    fn hint(&self, kind: GitErrorKind) -> &'static str {
+        match (kind, self) {
+            (GitErrorKind::HostKey, _) => {
+                "the SSH host key of the server changed or cannot be checked; when the \
+                 change is expected, forget the stored host key on the host page | "
+            }
+            (GitErrorKind::AuthFailed, Self::Ssh { key_file: None, .. }) => {
+                "the host has no SSH key; create or paste one on the host page | "
+            }
+            (GitErrorKind::AuthFailed, Self::Ssh { .. }) => {
+                "the server refused the SSH key; add the public key from the host page \
+                 to the server | "
+            }
+            _ => "",
+        }
+    }
+}
+
+/// The `ssh` command git runs: no user configuration, no prompts, only the
+/// given key, and host keys checked against `known_hosts`.
+fn ssh_command(key_file: Option<&Path>, known_hosts: &Path) -> String {
+    let mut command = format!(
+        "ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+         -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}",
+        shell_quote(known_hosts)
+    );
+    if let Some(key) = key_file {
+        command.push_str(" -i ");
+        command.push_str(&shell_quote(key));
+    }
+    command
+}
+
+/// `path` in single quotes for the shell git runs `GIT_SSH_COMMAND` with.
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitErrorKind {
     /// The repository does not exist, or the server hides it.
@@ -48,6 +101,8 @@ pub enum GitErrorKind {
     Network,
     /// The server refused the request for now because of its rate limit.
     RateLimited,
+    /// The SSH host key differs from the stored one, or cannot be checked.
+    HostKey,
     Timeout,
     /// `git` could not be started.
     Spawn,
@@ -89,7 +144,7 @@ impl Git {
         &self,
         dir: Option<&Path>,
         args: I,
-        credentials: Option<&Credentials>,
+        access: Option<&Access>,
     ) -> Result<Vec<u8>, GitError>
     where
         I: IntoIterator<Item = S>,
@@ -100,13 +155,13 @@ impl Git {
             .first()
             .map(|a| a.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let mut command = self.command(dir, credentials);
+        let mut command = self.command(dir, access);
         command.args(&args);
         let output = self.wait(command, &name).await?;
         if output.status.success() {
             return Ok(output.stdout);
         }
-        Err(failure(&name, &output.stderr, output.status, credentials))
+        Err(failure(&name, &output.stderr, output.status, access))
     }
 
     /// Runs `git <args>` in `dir` and keeps at most `limit` bytes of its
@@ -153,7 +208,7 @@ impl Git {
         Ok(stdout)
     }
 
-    fn command(&self, dir: Option<&Path>, credentials: Option<&Credentials>) -> Command {
+    fn command(&self, dir: Option<&Path>, access: Option<&Access>) -> Command {
         let mut command = Command::new("git");
         command
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -171,11 +226,23 @@ impl Git {
         }
         // An empty helper value clears every inherited helper first.
         command.args(["-c", "credential.helper="]);
-        if let Some(credentials) = credentials {
-            command
-                .args(["-c", CREDENTIAL_HELPER])
-                .env(ENV_USERNAME, &credentials.username)
-                .env(ENV_PASSWORD, &credentials.password);
+        match access {
+            Some(Access::Token(credentials)) => {
+                command
+                    .args(["-c", CREDENTIAL_HELPER])
+                    .env(ENV_USERNAME, &credentials.username)
+                    .env(ENV_PASSWORD, &credentials.password);
+            }
+            Some(Access::Ssh {
+                key_file,
+                known_hosts,
+            }) => {
+                command.env(
+                    "GIT_SSH_COMMAND",
+                    ssh_command(key_file.as_deref(), known_hosts),
+                );
+            }
+            None => {}
         }
         command
     }
@@ -244,17 +311,17 @@ fn io_error(name: &str, err: &std::io::Error) -> GitError {
     GitError::local(GitErrorKind::Other, format!("git {name}: {err}"))
 }
 
-fn failure(
-    name: &str,
-    stderr: &[u8],
-    status: ExitStatus,
-    credentials: Option<&Credentials>,
-) -> GitError {
+fn failure(name: &str, stderr: &[u8], status: ExitStatus, access: Option<&Access>) -> GitError {
     let stderr = String::from_utf8_lossy(stderr);
+    // Any access makes a refused login real: over HTTP without a token it
+    // can be a hidden missing repository, but an SSH server refuses the key
+    // itself, also when the host has none.
+    let kind = classify(&stderr, access.is_some());
+    let hint = access.map_or("", |access| access.hint(kind));
     GitError {
-        kind: classify(&stderr, credentials.is_some()),
+        kind,
         exit_code: status.code(),
-        message: format!("git {name}: {}", excerpt(&stderr)),
+        message: format!("git {name}: {hint}{}", excerpt(&stderr)),
     }
 }
 
@@ -265,6 +332,12 @@ fn failure(
 const PATTERNS: &[(&str, GitErrorKind)] = &[
     ("returned error: 429", GitErrorKind::RateLimited),
     ("rate limit", GitErrorKind::RateLimited),
+    (
+        "remote host identification has changed",
+        GitErrorKind::HostKey,
+    ),
+    ("host key verification failed", GitErrorKind::HostKey),
+    ("could not resolve hostname", GitErrorKind::Network),
     ("authentication failed", GitErrorKind::AuthFailed),
     ("returned error: 401", GitErrorKind::AuthFailed),
     ("returned error: 403", GitErrorKind::AuthFailed),
@@ -488,7 +561,7 @@ mod tests {
             username: "bot".into(),
             password: "s3cret-token".into(),
         };
-        let mut command = git().command(None, Some(&creds));
+        let mut command = git().command(None, Some(&Access::Token(creds)));
         command.args(["fetch", "https://example.com/o/n"]);
         let std = command.as_std();
         let args: Vec<String> = std
@@ -503,6 +576,80 @@ mod tests {
         assert_eq!(password, Some(std::ffi::OsStr::new("s3cret-token")));
     }
 
+    #[test]
+    fn ssh_access_sets_a_quoted_ssh_command_and_no_helper() {
+        let access = Access::Ssh {
+            key_file: Some(PathBuf::from("/data/tmp/key's file")),
+            known_hosts: PathBuf::from("/data/ssh/known_hosts"),
+        };
+        let command = git().command(None, Some(&access));
+        let std = command.as_std();
+        let ssh = std
+            .get_envs()
+            .find(|(name, _)| *name == "GIT_SSH_COMMAND")
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap();
+        assert!(
+            ssh.starts_with("ssh -F /dev/null -o BatchMode=yes"),
+            "{ssh}"
+        );
+        assert!(ssh.contains("StrictHostKeyChecking=accept-new"), "{ssh}");
+        assert!(
+            ssh.contains("UserKnownHostsFile='/data/ssh/known_hosts'"),
+            "{ssh}"
+        );
+        assert!(ssh.ends_with(r"-i '/data/tmp/key'\''s file'"), "{ssh}");
+        let args: Vec<String> = std
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|a| a.contains("GIT_ARCHIVE_CRED")),
+            "{args:?}"
+        );
+    }
+
+    fn ssh_access(key: Option<&str>) -> Access {
+        Access::Ssh {
+            key_file: key.map(PathBuf::from),
+            known_hosts: PathBuf::from("/k"),
+        }
+    }
+
+    #[test]
+    fn ssh_failures_name_their_cause() {
+        let status = std::process::Command::new("false").status().unwrap();
+        let changed = b"@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n\
+            Host key verification failed.\nfatal: Could not read from remote repository.";
+        let err = failure("ls-remote", changed, status, Some(&ssh_access(None)));
+        assert_eq!(err.kind, GitErrorKind::HostKey);
+        assert!(
+            err.message.contains("forget the stored host key"),
+            "{}",
+            err.message
+        );
+
+        // An SSH login refusal is an authentication error, with or without a
+        // key, never a hidden missing repository.
+        let refused = b"git@localhost: Permission denied (publickey).\n\
+            fatal: Could not read from remote repository.";
+        let err = failure("ls-remote", refused, status, Some(&ssh_access(None)));
+        assert_eq!(err.kind, GitErrorKind::AuthFailed);
+        assert!(
+            err.message.contains("the host has no SSH key"),
+            "{}",
+            err.message
+        );
+        let err = failure("ls-remote", refused, status, Some(&ssh_access(Some("/k1"))));
+        assert_eq!(err.kind, GitErrorKind::AuthFailed);
+        assert!(
+            err.message.contains("refused the SSH key"),
+            "{}",
+            err.message
+        );
+    }
+
     #[tokio::test]
     async fn credential_helper_answers_from_the_environment() {
         let creds = Credentials {
@@ -510,7 +657,7 @@ mod tests {
             password: "s3cret".into(),
         };
         let out = Git::new(Duration::from_secs(30))
-            .command(None, Some(&creds))
+            .command(None, Some(&Access::Token(creds)))
             .args(["credential", "fill"])
             .stdin(Stdio::piped())
             .spawn()

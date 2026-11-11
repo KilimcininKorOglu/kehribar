@@ -13,6 +13,7 @@ use super::repos::{NoticeQuery, PageContext};
 use crate::db::hosts::{self, Host, HostInput, Provider};
 use crate::db::unix_now;
 use crate::error::AppError;
+use crate::git::ssh;
 use crate::settings::CONCURRENCY_RANGE;
 use crate::{ref_filter, repo_url};
 
@@ -103,6 +104,9 @@ struct EditPage {
     layout: Layout,
     host: Host,
     fields: HostFields,
+    /// The SSH host keys stored for this host, as `known_hosts` lines.
+    known_keys: Vec<String>,
+    notice: Option<String>,
     error: Option<String>,
 }
 
@@ -261,32 +265,67 @@ pub async fn create(ctx: PageContext, Form(form): Form<HostForm>) -> Result<Resp
     Ok(Redirect::to("/hosts?notice=saved").into_response())
 }
 
-async fn load_host(ctx: &PageContext, id: i64) -> Result<Host, AppError> {
+pub(super) async fn load_host(ctx: &PageContext, id: i64) -> Result<Host, AppError> {
     hosts::get(&ctx.state.pool, id)
         .await?
         .ok_or(AppError::NotFound)
 }
 
-fn edit_page(
+/// Maps the `notice` query value of the host page to a message key.
+fn edit_notice_key(notice: Option<&str>) -> Option<&'static str> {
+    match notice? {
+        "ssh_saved" => Some("hosts.ssh_saved"),
+        "ssh_removed" => Some("hosts.ssh_removed"),
+        "host_key_forgotten" => Some("hosts.host_key_forgotten"),
+        _ => None,
+    }
+}
+
+/// The host page. `message` is a notice key, or with `is_error` a form
+/// error key.
+pub(super) async fn edit_page(
     ctx: &PageContext,
     host: Host,
     fields: HostFields,
-    error: Option<&str>,
+    message: Option<&str>,
+    is_error: bool,
 ) -> Result<Response, AppError> {
+    let known_keys = ssh::known_keys(&ctx.state.config.known_hosts(), &host.host)
+        .await
+        .map_err(AppError::internal)?;
     let layout = ctx.layout(Nav::Hosts);
+    let text = message.map(|key| layout.t(key).to_owned());
+    let (notice, error) = if is_error { (None, text) } else { (text, None) };
     let page = EditPage {
-        error: error.map(|key| layout.t(key).to_owned()),
         layout,
         host,
         fields,
+        known_keys,
+        notice,
+        error,
     };
     respond(&page, page.error.is_some())
 }
 
-pub async fn show(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, AppError> {
+pub async fn show(
+    ctx: PageContext,
+    Path(id): Path<i64>,
+    Query(query): Query<NoticeQuery>,
+) -> Result<Response, AppError> {
     let host = load_host(&ctx, id).await?;
     let fields = HostFields::from_host(&host);
-    edit_page(&ctx, host, fields, None)
+    let notice = edit_notice_key(query.notice.as_deref());
+    edit_page(&ctx, host, fields, notice, false).await
+}
+
+/// The host page with the stored values and an error.
+pub(super) async fn edit_error(
+    ctx: &PageContext,
+    host: Host,
+    key: &str,
+) -> Result<Response, AppError> {
+    let fields = HostFields::from_host(&host);
+    edit_page(ctx, host, fields, Some(key), true).await
 }
 
 pub async fn update(
@@ -298,12 +337,12 @@ pub async fn update(
     let fields = HostFields::from_host(&host).with_input(&form);
     let valid = match validate(&ctx, &form)? {
         Ok(valid) => valid,
-        Err(key) => return edit_page(&ctx, host, fields, Some(key)),
+        Err(key) => return edit_page(&ctx, host, fields, Some(key), true).await,
     };
     match hosts::update(&ctx.state.pool, id, &valid.input(), unix_now()).await {
         Ok(_) => {}
         Err(err) if is_unique_violation(&err) => {
-            return edit_page(&ctx, host, fields, Some("hosts.exists"));
+            return edit_page(&ctx, host, fields, Some("hosts.exists"), true).await;
         }
         Err(err) => return Err(err.into()),
     }
@@ -332,5 +371,7 @@ mod tests {
         assert_eq!(notice_key(Some("saved")), Some("hosts.saved"));
         assert_eq!(notice_key(Some("deleted")), Some("hosts.deleted"));
         assert_eq!(notice_key(Some("<b>")), None);
+        assert_eq!(edit_notice_key(Some("ssh_saved")), Some("hosts.ssh_saved"));
+        assert_eq!(edit_notice_key(Some("saved")), None);
     }
 }
