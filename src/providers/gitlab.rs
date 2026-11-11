@@ -1,4 +1,5 @@
-//! GitLab: `GET /groups/{path}/projects` with subgroups,
+//! GitLab: `GET /groups/{path}/projects` with subgroups and without shared
+//! projects,
 //! `GET /users/{name}/projects` and `GET /users/{name}/starred_projects`.
 
 use serde::Deserialize;
@@ -32,8 +33,10 @@ pub async fn list(
         SourceKind::Gists => return Err(ProviderError::kind(Provider::Gitlab, kind)),
     };
     if kind == SourceKind::Org {
+        // Projects of other namespaces shared into the group are not its own.
         url.query_pairs_mut()
-            .append_pair("include_subgroups", "true");
+            .append_pair("include_subgroups", "true")
+            .append_pair("with_shared", "false");
     }
     let projects: Vec<Project> = api.paged(url, "per_page", PER_PAGE).await?;
     Ok(projects

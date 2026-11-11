@@ -293,6 +293,8 @@ async fn gitlab_groups_include_subgroups_and_escape_the_path() {
     Mock::given(method("GET"))
         .and(path("/api/v4/groups/grp%2Fsub/projects"))
         .and(query_param("include_subgroups", "true"))
+        // GitLab adds the projects shared into the group unless told not to.
+        .and(query_param("with_shared", "false"))
         .and(query_param("page", "1"))
         .and(header("private-token", "glpat"))
         .respond_with(ResponseTemplate::new(200).set_body_json(items(0, 2, project)))
