@@ -292,6 +292,46 @@ async fn a_kept_ref_below_the_name_moves_the_rescue_to_the_next_second() {
 }
 
 #[tokio::test]
+async fn a_rebuilt_merge_ref_is_not_kept_but_a_rewritten_pull_head_is() {
+    let mut source = Source::new();
+    let base = source.commit("one");
+    let first = source.commit("two");
+    source.git(&["update-ref", "refs/pull/1/merge", &first]);
+    source.git(&["update-ref", "refs/merge-requests/2/merge", &first]);
+    source.git(&["update-ref", "refs/pull/1/head", &first]);
+    source.sync(100).await;
+
+    // The server rebuilds the test merge on every base change; the author
+    // force-pushes the pull request head.
+    source.git(&["reset", "--quiet", "--hard", &base]);
+    let other = source.commit("three");
+    for name in [
+        "refs/pull/1/merge",
+        "refs/merge-requests/2/merge",
+        "refs/pull/1/head",
+    ] {
+        source.git(&["update-ref", name, &other]);
+    }
+    let report = source.sync(200).await;
+
+    let refs = source.archive_refs();
+    let kept: Vec<&String> = refs
+        .keys()
+        .filter(|name| name.starts_with(REWRITTEN_REF_PREFIX))
+        .collect();
+    // main and the pull request head; never the rebuilt merge commits.
+    assert_eq!(
+        kept,
+        [
+            &format!("{REWRITTEN_REF_PREFIX}200/heads/main"),
+            &format!("{REWRITTEN_REF_PREFIX}200/pull/1/head"),
+        ]
+    );
+    assert_eq!(report.refs_rescued, 2);
+    assert_eq!(refs["refs/pull/1/merge"], other);
+}
+
+#[tokio::test]
 async fn moved_tag_is_kept() {
     let mut source = Source::new();
     let first = source.commit("one");

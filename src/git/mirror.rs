@@ -479,6 +479,8 @@ async fn classify_changes(
         let old = before.get(name);
         let kind = match old {
             None => ChangeKind::Created,
+            // Nothing of the old commit is lost: the server made it.
+            Some(_) if is_rebuilt_merge(name) => ChangeKind::Moved,
             Some(old_id) if is_ancestor(git, dir, old_id, new_id).await? => ChangeKind::Moved,
             Some(old_id) => {
                 rescue(git, dir, name, old_id, now).await?;
@@ -493,6 +495,15 @@ async fn classify_changes(
         });
     }
     Ok(changes)
+}
+
+/// Whether `name` is a test merge that the server builds again whenever the
+/// target branch moves: GitHub and Forgejo `refs/pull/<n>/merge`, GitLab
+/// `refs/merge-requests/<n>/merge` and `/train`. Keeping each old one would
+/// add a ref for every open pull request on every sync.
+fn is_rebuilt_merge(name: &str) -> bool {
+    let review = name.starts_with("refs/pull/") || name.starts_with("refs/merge-requests/");
+    review && (name.ends_with("/merge") || name.ends_with("/train"))
 }
 
 /// Seconds after the sync start a kept commit may be named with, when an
