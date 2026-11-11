@@ -256,18 +256,21 @@ pub fn is_hash(name: &str) -> bool {
     name.len() == 64 && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Stores `image` under its hash, unless a file with that content exists.
-async fn store(config: &Config, image: &Image) -> std::io::Result<String> {
+/// Stores `image` in `dir` under its hash, unless a file with that content
+/// exists.
+async fn store(dir: &Path, image: &Image) -> std::io::Result<String> {
     let hash = sha256_hex(&image.data);
-    let dir = config.assets_dir();
     let file = dir.join(&hash);
     if tokio::fs::try_exists(&file).await? {
         return Ok(hash);
     }
-    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::create_dir_all(dir).await?;
     // Written beside its final name and renamed, so a reader never sees a
-    // partial file.
-    let part = dir.join(format!(".{hash}.part"));
+    // partial file. Each writer has its own part file: two syncs that store
+    // the same image at once never write into one file.
+    let mut suffix = [0u8; 8];
+    getrandom::fill(&mut suffix).map_err(std::io::Error::other)?;
+    let part = dir.join(format!(".{hash}.{}.part", sha256_hex(&suffix)));
     tokio::fs::write(&part, &image.data).await?;
     tokio::fs::rename(&part, &file).await?;
     Ok(hash)
@@ -380,7 +383,7 @@ async fn fetch(ctx: &SyncContext, repo: &Repo, url: &str, now: i64) -> sqlx::Res
             return Ok(());
         }
     };
-    let sha256 = match store(&ctx.config, &image).await {
+    let sha256 = match store(&ctx.config.assets_dir(), &image).await {
         Ok(hash) => hash,
         Err(err) => {
             tracing::warn!(repo = %repo.url, %url, %err, "cannot store an image");
@@ -525,5 +528,22 @@ mod tests {
         }
         let err = download(&guard, "file:///etc/passwd").await.unwrap_err();
         assert!(err.contains("file URLs are not fetched"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn storing_does_not_touch_the_part_file_of_another_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = Image {
+            data: b"png bytes".to_vec(),
+            content_type: "image/png".to_owned(),
+        };
+        let hash = sha256_hex(&image.data);
+        // Another sync is writing the same image now.
+        let other = dir.path().join(format!(".{hash}.part"));
+        std::fs::write(&other, b"png").unwrap();
+
+        assert_eq!(store(dir.path(), &image).await.unwrap(), hash);
+        assert_eq!(std::fs::read(dir.path().join(&hash)).unwrap(), image.data);
+        assert_eq!(std::fs::read(&other).unwrap(), b"png");
     }
 }
