@@ -87,8 +87,11 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         Ok(done) => done,
         Err((message, report)) => return defer(ctx, repo, run_id, &message, &report).await,
     };
+    // The archived wiki stays readable, and its images stay kept, after the
+    // source deletes its wiki or the wiki is turned off.
+    let has_wiki = mirrored.has_wiki || mirror::wiki_dir(&dir).join("HEAD").is_file();
     if status == RepoStatus::Ok {
-        assets::refresh(ctx, &git, repo, &dir, mirrored.has_wiki, started).await?;
+        assets::refresh(ctx, &git, repo, &dir, has_wiki, started).await?;
     }
     let finished = unix_now();
     let interval = repo.interval_minutes.unwrap_or(settings.interval_minutes);
@@ -104,7 +107,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         size_bytes,
         lfs_size_bytes,
         default_branch: mirrored.report.default_branch.as_deref(),
-        has_wiki: mirrored.has_wiki || (status != RepoStatus::Ok && repo.has_wiki),
+        has_wiki,
     };
     repos::finish(&ctx.pool, repo.id, &outcome).await?;
     report_change(ctx, repo, status, message.as_deref()).await;

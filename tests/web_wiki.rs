@@ -88,6 +88,30 @@ async fn the_home_page_links_to_the_other_pages() {
 }
 
 #[tokio::test]
+async fn a_wiki_the_source_deletes_stays_in_the_archive() {
+    let t = TestApp::new().await;
+    let source = source_repo(t.dir.path(), "source");
+    wiki_fixture(&source);
+    archive_source(&t, &source, true).await;
+    std::fs::remove_dir_all(mirror::wiki_url(&source.to_string_lossy(), false)).unwrap();
+
+    git_archive::db::repos::schedule_now(&t.state.pool, 1, git_archive::db::unix_now())
+        .await
+        .unwrap();
+    for handle in t.state.scheduler.tick().await.unwrap() {
+        handle.await.unwrap();
+    }
+    let repo = git_archive::db::repos::get(&t.state.pool, 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(repo.has_wiki, "{:?}", repo.last_error);
+    let (status, html) = page(&t, "/repos/1/wiki").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("<h1>Welcome</h1>"), "{html}");
+}
+
+#[tokio::test]
 async fn asciidoc_and_rst_render_and_mediawiki_shows_as_text() {
     let t = archived(true).await;
     let (status, adoc) = page(&t, "/repos/1/wiki/Getting-Started").await;
