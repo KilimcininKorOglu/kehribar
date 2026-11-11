@@ -221,6 +221,42 @@ pub fn urlencode(text: &str) -> String {
     url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
 }
 
+/// Adds the local repository at `source` as `local/team/project` and
+/// archives it with one scheduler tick, which must succeed.
+pub async fn archive_source(t: &TestApp, source: &Path, wiki_enabled: bool) -> db::repos::Repo {
+    use git_archive::db::repos::{self, NewRepo, RepoStatus};
+
+    let url = source.to_string_lossy();
+    let repo = NewRepo {
+        url: &url,
+        host: "local",
+        owner: "team",
+        name: "project",
+        source_id: None,
+        username: None,
+        token_enc: None,
+        interval_minutes: None,
+        wiki_enabled,
+    };
+    let id = repos::insert(&t.state.pool, &repo, db::unix_now())
+        .await
+        .unwrap()
+        .expect("a new repository");
+    for handle in t.state.scheduler.tick().await.unwrap() {
+        handle.await.unwrap();
+    }
+    let repo = repos::get(&t.state.pool, id).await.unwrap().unwrap();
+    assert_eq!(repo.status, RepoStatus::Ok, "{:?}", repo.last_error);
+    repo
+}
+
+/// The status and the body of a page.
+pub async fn page(t: &TestApp, uri: &str) -> (StatusCode, String) {
+    let response = t.get(uri).await;
+    let status = response.status();
+    (status, body_text(response).await)
+}
+
 pub async fn body_text(response: Response<Body>) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()

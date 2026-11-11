@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use axum::http::StatusCode;
-use common::{TestApp, body_text, git_in, source_repo};
-use git_archive::db::repos::{self, NewRepo, RepoStatus};
-use git_archive::db::unix_now;
+use common::{TestApp, archive_source, git_in, page, source_repo};
 use git_archive::web::compare::MAX_COMMITS;
 
 /// A source whose `feature` branch adds two commits to `main`, whose
@@ -74,33 +72,8 @@ fn import_commits(source: &Path, branch: &str, count: usize) {
 async fn archived() -> TestApp {
     let t = TestApp::new().await;
     let source = fixture(t.dir.path());
-    let url = source.to_string_lossy();
-    let repo = NewRepo {
-        url: &url,
-        host: "local",
-        owner: "team",
-        name: "project",
-        source_id: None,
-        username: None,
-        token_enc: None,
-        interval_minutes: None,
-        wiki_enabled: false,
-    };
-    repos::insert(&t.state.pool, &repo, unix_now())
-        .await
-        .unwrap();
-    for handle in t.state.scheduler.tick().await.unwrap() {
-        handle.await.unwrap();
-    }
-    let repo = repos::get(&t.state.pool, 1).await.unwrap().unwrap();
-    assert_eq!(repo.status, RepoStatus::Ok, "{:?}", repo.last_error);
+    archive_source(&t, &source, false).await;
     t
-}
-
-async fn page(t: &TestApp, uri: &str) -> (StatusCode, String) {
-    let response = t.get(uri).await;
-    let status = response.status();
-    (status, body_text(response).await)
 }
 
 #[tokio::test]
