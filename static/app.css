@@ -590,8 +590,15 @@ textarea:focus {
   background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 
+/* Names and dates break at their hyphens on a narrow screen; the table
+   scrolls sideways instead. */
 .repo-name {
   font-size: 0.98rem;
+}
+
+.repo-name,
+.table time {
+  white-space: nowrap;
 }
 
 .repo-title {
