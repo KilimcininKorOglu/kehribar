@@ -227,6 +227,15 @@ pub fn form_request(uri: &str, body: &str) -> Request<Body> {
         .unwrap()
 }
 
+/// A request without a session, with `auth` as its `Authorization` header.
+pub fn auth_request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
+    let mut request = Request::builder().method(method).uri(uri);
+    if let Some(auth) = auth {
+        request = request.header(header::AUTHORIZATION, auth);
+    }
+    request.body(Body::empty()).unwrap()
+}
+
 /// `text` encoded as one value of a form body.
 pub fn urlencode(text: &str) -> String {
     url::form_urlencoded::byte_serialize(text.as_bytes()).collect()

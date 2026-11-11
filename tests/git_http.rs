@@ -98,11 +98,8 @@ fn basic(user: &str, password: &str) -> String {
 }
 
 fn advertise_request(auth: Option<&str>) -> Request<Body> {
-    let mut request = Request::get(format!("{REPO_PATH}/info/refs?service=git-upload-pack"));
-    if let Some(auth) = auth {
-        request = request.header(header::AUTHORIZATION, auth);
-    }
-    request.body(Body::empty()).unwrap()
+    let uri = format!("{REPO_PATH}/info/refs?service=git-upload-pack");
+    common::auth_request("GET", &uri, auth)
 }
 
 #[tokio::test]

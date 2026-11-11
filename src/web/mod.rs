@@ -1,5 +1,6 @@
 //! HTTP routing and shared request state.
 
+pub mod api;
 pub mod auth;
 pub mod browse;
 pub mod compare;
@@ -192,6 +193,8 @@ pub fn router(state: AppState) -> Router {
         .route("/git/{*path}", any(git_http::serve))
         // The token in the path is the credential of a push webhook.
         .route("/hooks/{token}", post(hooks::receive))
+        // API clients authenticate with a Bearer token, not with the session.
+        .nest("/api/v1", api::router(state.clone()))
         .merge(private)
         .layer(from_fn(security::same_origin))
         .layer(from_fn(security::headers))
