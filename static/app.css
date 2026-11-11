@@ -432,6 +432,12 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--ok) 30%, transparent);
 }
 
+.alert-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
 .small {
   font-size: 0.85rem;
 }
@@ -1084,6 +1090,56 @@ pre.diff {
 
 .table-card-title {
   padding: 1rem 1rem 0;
+}
+
+.table-card-note {
+  margin: 0;
+  padding: 0 1rem 1rem;
+}
+
+/* Ref history */
+
+.date-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+.date-form input {
+  width: auto;
+}
+
+.badge-event-created,
+.badge-event-back_at_source {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge-event-moved {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.badge-event-rewritten,
+.badge-event-deleted_at_source {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.run-events > td {
+  padding-top: 0;
+}
+
+.run-events summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.run-events-table td {
+  border-bottom: 0;
+  padding: 0.3rem 0.75rem;
 }
 
 /* Repository list filters */

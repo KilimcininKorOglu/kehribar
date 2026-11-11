@@ -7,6 +7,7 @@ pub mod form;
 pub mod format;
 pub mod git_http;
 pub mod highlight;
+pub mod history;
 pub mod host_ssh;
 pub mod hosts;
 pub mod markdown;
@@ -117,6 +118,7 @@ pub fn router(state: AppState) -> Router {
         .route("/repos/{id}/commits", get(browse::commits))
         .route("/repos/{id}/commit/{sha}", get(browse::commit))
         .route("/repos/{id}/refs", get(browse::refs))
+        .route("/repos/{id}/history", get(history::show))
         .route("/repos/{id}/archive", get(browse::archive))
         .route("/repos/{id}/delete", post(repos::delete))
         .route("/hosts", get(hosts::list).post(hosts::create))

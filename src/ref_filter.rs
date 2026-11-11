@@ -44,6 +44,22 @@ pub fn combine(host: Option<&str>, repo: Option<&str>) -> Vec<String> {
     all
 }
 
+/// Whether the ref `name` matches `pattern` as Git matches a refspec: the
+/// one `*` stands for any text, `/` included.
+pub fn matches(pattern: &str, name: &str) -> bool {
+    match pattern.split_once('*') {
+        None => pattern == name,
+        Some((head, tail)) => {
+            name.len() >= head.len() + tail.len() && name.starts_with(head) && name.ends_with(tail)
+        }
+    }
+}
+
+/// Whether any of `patterns` matches `name`.
+pub fn is_excluded(patterns: &[String], name: &str) -> bool {
+    patterns.iter().any(|pattern| matches(pattern, name))
+}
+
 /// Parts that Git does not allow inside a ref name.
 const FORBIDDEN_PARTS: &[&str] = &["..", "//", "@{"];
 /// Endings that Git does not allow for a ref name.
@@ -105,6 +121,26 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn patterns_match_like_git_refspecs() {
+        assert!(matches("refs/pull/*", "refs/pull/12/head"));
+        assert!(matches(
+            "refs/merge-requests/*/head",
+            "refs/merge-requests/3/head"
+        ));
+        assert!(!matches(
+            "refs/merge-requests/*/head",
+            "refs/merge-requests/3/merge"
+        ));
+        assert!(matches("refs/heads/tmp", "refs/heads/tmp"));
+        assert!(!matches("refs/heads/tmp", "refs/heads/tmp2"));
+        // The head and the tail of a pattern never overlap.
+        assert!(!matches("refs/a*a", "refs/a"));
+        let patterns = ["refs/pull/*".to_owned(), "refs/heads/wip-*".to_owned()];
+        assert!(is_excluded(&patterns, "refs/heads/wip-x"));
+        assert!(!is_excluded(&patterns, "refs/heads/main"));
     }
 
     #[test]

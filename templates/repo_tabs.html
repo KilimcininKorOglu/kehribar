@@ -3,4 +3,5 @@
   <a href="/repos/{{ repo.id }}/tree" aria-current="{% if tab == "files" %}page{% else %}false{% endif %}">{{ layout.t("browse.files") }}</a>
   <a href="/repos/{{ repo.id }}/commits" aria-current="{% if tab == "commits" %}page{% else %}false{% endif %}">{{ layout.t("browse.commits") }}</a>
   <a href="/repos/{{ repo.id }}/refs" aria-current="{% if tab == "refs" %}page{% else %}false{% endif %}">{{ layout.t("browse.refs") }}</a>
+  <a href="/repos/{{ repo.id }}/history" aria-current="{% if tab == "history" %}page{% else %}false{% endif %}">{{ layout.t("history.title") }}</a>
 </nav>

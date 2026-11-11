@@ -4,6 +4,7 @@
 //! because both can contain `/`. Without `ref`, a page shows the default
 //! branch, and its links leave `ref` out too.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,6 +22,7 @@ use super::highlight;
 use super::markdown::{self, LinkTarget};
 use super::pages::{Layout, Nav, render};
 use super::repos::PageContext;
+use crate::db::ref_events;
 use crate::db::repos::{self, Repo};
 use crate::error::AppError;
 use crate::git::read::{
@@ -839,9 +841,15 @@ struct RefsPage {
     view: RepoView,
     tab: &'static str,
     refs: Vec<RefEntry>,
+    /// Branches and tags the source no longer has, with the time it was seen.
+    missing: BTreeMap<String, i64>,
 }
 
 impl RefsPage {
+    fn missing_since(&self, entry: &RefEntry) -> Option<i64> {
+        self.missing.get(&entry.name).copied()
+    }
+
     /// The ref kinds in page order, with the message key of their title.
     fn sections(&self) -> [(&'static str, &'static str); 3] {
         [
@@ -876,6 +884,7 @@ pub async fn refs(ctx: PageContext, Path(id): Path<i64>) -> Result<Response, App
         view,
         tab: "refs",
         refs,
+        missing: ref_events::missing(&ctx.state.pool, id).await?,
     };
     Ok(render(&page)?.into_response())
 }

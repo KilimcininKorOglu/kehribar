@@ -13,6 +13,7 @@ use super::form::{encrypt_token, is_checked, optional_number, optional_text};
 use super::pages::{Layout, Nav, render};
 use super::prefs::Prefs;
 use crate::db::hosts::{self, Host};
+use crate::db::ref_events::{self, RefEvent};
 use crate::db::repos::{self, ListFilter, NewRepo, Repo, RepoSettings, RepoSort, RepoStatus};
 use crate::db::sync_runs::{self, SyncRun};
 use crate::db::unix_now;
@@ -532,6 +533,8 @@ struct DetailPage {
     layout: Layout,
     repo: Repo,
     runs: Vec<SyncRun>,
+    /// The ref events of the listed runs.
+    events: Vec<RefEvent>,
     interval: String,
     global_interval: String,
     global_minutes: i64,
@@ -583,6 +586,19 @@ impl DetailPage {
     fn has_own_token(&self) -> bool {
         self.credential_source == CredentialSource::Repo
     }
+
+    fn events_of(&self, run: &SyncRun) -> Vec<&RefEvent> {
+        self.events
+            .iter()
+            .filter(|e| e.run_id == Some(run.id))
+            .collect()
+    }
+
+    /// "3 ref events" for the summary of a run's details.
+    fn events_label(&self, count: usize) -> String {
+        self.layout
+            .tf_number("repo.run_events", &i64::try_from(count).unwrap_or(i64::MAX))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -601,6 +617,7 @@ async fn detail_page(
     error: Option<String>,
 ) -> Result<DetailPage, AppError> {
     let runs = sync_runs::list_for_repo(&ctx.state.pool, repo.id, HISTORY_LIMIT).await?;
+    let events = ref_events::of_recent_runs(&ctx.state.pool, repo.id, HISTORY_LIMIT).await?;
     let global = crate::settings::effective(&ctx.state.pool, &ctx.state.config).await?;
     let host = hosts::find_by_host(&ctx.state.pool, repo_url::settings_host(&repo.host)).await?;
     let credential_source = credentials::source(&repo, host.as_ref());
@@ -620,6 +637,7 @@ async fn detail_page(
         layout,
         repo,
         runs,
+        events,
         notice,
         error,
         host,

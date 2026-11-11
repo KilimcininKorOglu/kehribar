@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::command::{Access, Git, GitError, GitErrorKind};
+use crate::ref_filter;
 
 /// Prefix of the refs that this archive creates. The fetch refspec excludes
 /// it, so the source can neither overwrite nor delete these refs.
@@ -25,6 +26,25 @@ const REPO_CONFIG: &[(&str, &str)] = &[
     ("core.logAllRefUpdates", "always"),
 ];
 
+/// How a ref changed in one sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Created,
+    /// The new commit contains the old one.
+    Moved,
+    /// The new commit does not contain the old one, which was kept.
+    Rewritten,
+}
+
+/// One ref that a sync created or moved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefChange {
+    pub name: String,
+    pub old: Option<String>,
+    pub new: String,
+    pub kind: ChangeKind,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncReport {
     /// Refs created or moved by this sync.
@@ -33,6 +53,28 @@ pub struct SyncReport {
     pub refs_rescued: u64,
     /// Branch the source's HEAD points to, when the source has one.
     pub default_branch: Option<String>,
+    /// The changes of the tracked refs, see [`is_tracked`].
+    pub changes: Vec<RefChange>,
+    /// The tracked refs of the archive after the fetch, name to object id.
+    pub archive_refs: BTreeMap<String, String>,
+    /// The tracked refs of the source.
+    pub source_refs: BTreeMap<String, String>,
+}
+
+impl SyncReport {
+    /// Tracked refs that the archive keeps but the source no longer has.
+    pub fn missing_at_source(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.archive_refs
+            .iter()
+            .filter(|(name, _)| !self.source_refs.contains_key(*name))
+    }
+}
+
+/// Whether the history of a ref is recorded: branches and tags that no
+/// exclude pattern matches.
+pub fn is_tracked(name: &str, exclude: &[String]) -> bool {
+    (name.starts_with("refs/heads/") || name.starts_with("refs/tags/"))
+        && !ref_filter::is_excluded(exclude, name)
 }
 
 /// Fetches every ref of `url` into the bare repository at `dir`, creating
@@ -48,7 +90,7 @@ pub async fn sync(
     exclude: &[String],
 ) -> Result<SyncReport, GitError> {
     // Ask the source first: a missing repository leaves no directory behind.
-    let remote_head = remote_head(git, url, access).await?;
+    let remote = remote_refs(git, url, access).await?;
     prepare_repository(git, url, dir, exclude).await?;
     remove_stale_locks(dir).await?;
 
@@ -61,13 +103,26 @@ pub async fn sync(
     .await?;
     let after = list_refs(git, dir).await?;
 
-    let refs_changed = changed_refs(&before, &after).count() as u64;
-    let refs_rescued = rescue_rewritten(git, dir, &before, &after, now).await?;
-    let default_branch = point_head(git, dir, remote_head.as_deref(), &after).await?;
+    let changes = classify_changes(git, dir, &before, &after, now).await?;
+    let default_branch = point_head(git, dir, remote.head.as_deref(), &after).await?;
+    let tracked = |refs: BTreeMap<String, String>| -> BTreeMap<String, String> {
+        refs.into_iter()
+            .filter(|(name, _)| is_tracked(name, exclude))
+            .collect()
+    };
     Ok(SyncReport {
-        refs_changed,
-        refs_rescued,
+        refs_changed: changes.len() as u64,
+        refs_rescued: changes
+            .iter()
+            .filter(|c| c.kind == ChangeKind::Rewritten)
+            .count() as u64,
         default_branch,
+        changes: changes
+            .into_iter()
+            .filter(|c| is_tracked(&c.name, exclude))
+            .collect(),
+        archive_refs: tracked(after),
+        source_refs: tracked(remote.refs),
     })
 }
 
@@ -109,24 +164,49 @@ pub fn wiki_dir(dir: &Path) -> PathBuf {
     dir.with_file_name(format!("{stem}.wiki.git"))
 }
 
-/// Reads the ref the source's HEAD points to, which also checks that the
-/// source is reachable with these credentials.
-async fn remote_head(
+/// The refs of the source and the ref its HEAD points to.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RemoteRefs {
+    head: Option<String>,
+    refs: BTreeMap<String, String>,
+}
+
+/// Lists the refs of the source, which also checks that the source is
+/// reachable with these credentials.
+async fn remote_refs(
     git: &Git,
     url: &str,
     access: Option<&Access>,
-) -> Result<Option<String>, GitError> {
+) -> Result<RemoteRefs, GitError> {
     let out = git
         .run(
             None,
-            ["ls-remote", "--symref", "--end-of-options", url, "HEAD"],
+            ["ls-remote", "--symref", "--end-of-options", url],
             access,
         )
         .await?;
-    Ok(String::from_utf8_lossy(&out).lines().find_map(|line| {
-        let target = line.strip_prefix("ref: ")?.split('\t').next()?;
-        Some(target.to_owned())
-    }))
+    Ok(parse_ls_remote(&String::from_utf8_lossy(&out)))
+}
+
+/// Reads `git ls-remote --symref` output. The peeled lines of annotated
+/// tags (`<ref>^{}`) are skipped: the archive lists the tag object too.
+fn parse_ls_remote(text: &str) -> RemoteRefs {
+    let mut remote = RemoteRefs::default();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("ref: ") {
+            if let Some((target, "HEAD")) = rest.split_once('\t') {
+                remote.head = Some(target.to_owned());
+            }
+            continue;
+        }
+        let Some((id, name)) = line.split_once('\t') else {
+            continue;
+        };
+        if name != "HEAD" && !name.ends_with("^{}") {
+            remote.refs.insert(name.to_owned(), id.to_owned());
+        }
+    }
+    remote
 }
 
 async fn prepare_repository(
@@ -261,34 +341,89 @@ fn changed_refs<'a>(
         .filter(move |(name, id)| before.get(*name) != Some(*id))
 }
 
-/// Keeps the old commit of every ref whose new commit does not contain it.
-async fn rescue_rewritten(
+/// Sorts every changed ref into created, moved and rewritten, and keeps the
+/// old commit of every rewritten ref.
+async fn classify_changes(
     git: &Git,
     dir: &Path,
     before: &BTreeMap<String, String>,
     after: &BTreeMap<String, String>,
     now: i64,
-) -> Result<u64, GitError> {
-    let mut rescued = 0;
+) -> Result<Vec<RefChange>, GitError> {
+    let mut changes = Vec::new();
     for (name, new_id) in changed_refs(before, after) {
-        let Some(old_id) = before.get(name) else {
-            continue;
+        let old = before.get(name);
+        let kind = match old {
+            None => ChangeKind::Created,
+            Some(old_id) if is_ancestor(git, dir, old_id, new_id).await? => ChangeKind::Moved,
+            Some(old_id) => {
+                rescue(git, dir, name, old_id, now).await?;
+                ChangeKind::Rewritten
+            }
         };
-        if is_ancestor(git, dir, old_id, new_id).await? {
-            continue;
-        }
-        let short = name.strip_prefix("refs/").unwrap_or(name);
-        let rescue = format!("{REWRITTEN_REF_PREFIX}{now}/{short}");
-        git.run(
+        changes.push(RefChange {
+            name: name.clone(),
+            old: old.cloned(),
+            new: new_id.clone(),
+            kind,
+        });
+    }
+    Ok(changes)
+}
+
+/// Keeps `old_id`, the commit a rewritten ref pointed to.
+async fn rescue(git: &Git, dir: &Path, name: &str, old_id: &str, now: i64) -> Result<(), GitError> {
+    let short = name.strip_prefix("refs/").unwrap_or(name);
+    let rescue = format!("{REWRITTEN_REF_PREFIX}{now}/{short}");
+    git.run(Some(dir), ["update-ref", rescue.as_str(), old_id], None)
+        .await?;
+    tracing::info!(r#ref = %name, old = %old_id, kept_as = %rescue, "rewritten ref kept");
+    Ok(())
+}
+
+/// A commit kept when its ref was rewritten.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RescuedRef {
+    /// When the ref was rewritten.
+    pub at: i64,
+    /// The rewritten ref, such as `refs/heads/main`.
+    pub name: String,
+    pub id: String,
+}
+
+/// The kept commits of the tracked refs, see [`is_tracked`].
+pub async fn rescued_refs(
+    git: &Git,
+    dir: &Path,
+    exclude: &[String],
+) -> Result<Vec<RescuedRef>, GitError> {
+    let out = git
+        .run(
             Some(dir),
-            ["update-ref", rescue.as_str(), old_id.as_str()],
+            [
+                "for-each-ref",
+                "--format=%(objectname) %(refname)",
+                REWRITTEN_REF_PREFIX,
+            ],
             None,
         )
         .await?;
-        tracing::info!(r#ref = %name, old = %old_id, kept_as = %rescue, "rewritten ref kept");
-        rescued += 1;
-    }
-    Ok(rescued)
+    Ok(String::from_utf8_lossy(&out)
+        .lines()
+        .filter_map(parse_rescued)
+        .filter(|r| is_tracked(&r.name, exclude))
+        .collect())
+}
+
+/// Reads `<id> refs/git-archive/rewritten/<time>/<name without refs/>`.
+fn parse_rescued(line: &str) -> Option<RescuedRef> {
+    let (id, full) = line.split_once(' ')?;
+    let (at, short) = full.strip_prefix(REWRITTEN_REF_PREFIX)?.split_once('/')?;
+    Some(RescuedRef {
+        at: at.parse().ok()?,
+        name: format!("refs/{short}"),
+        id: id.to_owned(),
+    })
 }
 
 /// Whether `old` is reachable from `new`. Objects that are not commits, such
@@ -395,5 +530,57 @@ mod tests {
             .map(|(n, _)| n.as_str())
             .collect();
         assert_eq!(names, ["b", "new"]);
+    }
+
+    #[test]
+    fn ls_remote_output_gives_head_and_refs_without_peeled_tags() {
+        let text = "ref: refs/heads/main\tHEAD\n\
+                    aaa\tHEAD\n\
+                    aaa\trefs/heads/main\n\
+                    bbb\trefs/tags/v1\n\
+                    ccc\trefs/tags/v1^{}\n\
+                    ddd\trefs/pull/1/head\n";
+        let remote = parse_ls_remote(text);
+        assert_eq!(remote.head.as_deref(), Some("refs/heads/main"));
+        let names: Vec<_> = remote
+            .refs
+            .iter()
+            .map(|(n, id)| (n.as_str(), id.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("refs/heads/main", "aaa"),
+                ("refs/pull/1/head", "ddd"),
+                ("refs/tags/v1", "bbb")
+            ]
+        );
+    }
+
+    #[test]
+    fn only_branches_and_tags_outside_the_patterns_are_tracked() {
+        let exclude = ["refs/heads/wip-*".to_owned()];
+        assert!(is_tracked("refs/heads/main", &exclude));
+        assert!(is_tracked("refs/tags/v1", &exclude));
+        assert!(!is_tracked("refs/heads/wip-1", &exclude));
+        assert!(!is_tracked("refs/pull/1/head", &exclude));
+        assert!(!is_tracked("refs/notes/commits", &exclude));
+    }
+
+    #[test]
+    fn rescued_ref_lines_give_time_and_ref() {
+        assert_eq!(
+            parse_rescued("abc refs/git-archive/rewritten/1700000000/heads/feature/x"),
+            Some(RescuedRef {
+                at: 1_700_000_000,
+                name: "refs/heads/feature/x".into(),
+                id: "abc".into()
+            })
+        );
+        assert_eq!(parse_rescued("abc refs/heads/main"), None);
+        assert_eq!(
+            parse_rescued("abc refs/git-archive/rewritten/x/heads/a"),
+            None
+        );
     }
 }

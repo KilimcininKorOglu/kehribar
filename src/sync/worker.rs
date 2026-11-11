@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::{SyncContext, credentials};
+use super::{SyncContext, credentials, ref_log};
 use crate::db::hosts::{self, Host, Provider};
 use crate::db::repos::{self, Repo, RepoStatus, SyncOutcome};
 use crate::db::sync_runs::{self, RunOutcome, RunResult};
@@ -78,6 +78,7 @@ pub async fn run(ctx: &SyncContext, repo: &Repo, settings: SyncSettings) -> sqlx
         host: host.as_ref(),
         dir: &dir,
         now: started,
+        run_id,
     };
     let (status, message, mirrored) = match sync_and_maintain(ctx, &job, settings).await? {
         Ok(done) => done,
@@ -261,6 +262,7 @@ struct Job<'a> {
     host: Option<&'a Host>,
     dir: &'a Path,
     now: i64,
+    run_id: i64,
 }
 
 impl Job<'_> {
@@ -281,6 +283,17 @@ async fn mirror_repo(ctx: &SyncContext, job: &Job<'_>) -> Result<Mirrored, Failu
         job.repo.ref_exclude.as_deref(),
     );
     let report = mirror::sync(job.git, &job.repo.url, job.dir, access, job.now, &exclude).await?;
+    // Written before the wiki and LFS fetch: their failure must not lose
+    // the history of a fetch that already happened.
+    let fetch = ref_log::Fetch {
+        repo_id: job.repo.id,
+        run_id: job.run_id,
+        now: job.now,
+        report: &report,
+    };
+    ref_log::record(&ctx.pool, job.git, job.dir, &exclude, &fetch)
+        .await
+        .map_err(|err| Failure::error(format!("cannot record the ref history: {err}")))?;
     let has_wiki = if job.repo.wiki_enabled {
         mirror_wiki(job, access).await?
     } else {

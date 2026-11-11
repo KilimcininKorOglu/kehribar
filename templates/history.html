@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ layout.t("history.title") }} · {{ repo.owner }}/{{ repo.name }}{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ repo.host }}</nav>
+<div class="page-head">
+  <h1 class="repo-title"><a class="plain" href="/repos/{{ repo.id }}">{{ repo.owner }}/<strong>{{ repo.name }}</strong></a></h1>
+</div>
+{% include "repo_tabs.html" %}
+
+<form class="search date-form" method="get" action="/repos/{{ repo.id }}/history">
+  <label for="history-at">{{ layout.t("history.date") }}</label>
+  <input id="history-at" type="date" name="at" value="{{ day }}" max="{{ today }}" required>
+  <button class="btn" type="submit">{{ layout.t("history.show") }}</button>
+</form>
+
+{% if since.is_some() %}
+{% if is_before_recording() %}
+<p class="alert alert-warn" role="note">{{ before_note() }}</p>
+{% endif %}
+{% else %}
+<section class="card"><p class="muted">{{ layout.t("history.none_yet") }}</p></section>
+{% endif %}
+
+{% if since.is_some() %}
+<section class="card table-card">
+  <h2 class="table-card-title">{{ state_title() }}</h2>
+  {% if states.is_empty() %}
+  <p class="muted table-card-note">{{ layout.t("history.nothing_then") }}</p>
+  {% else %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("history.col_ref") }}</th>
+        <th scope="col">{{ layout.t("history.col_commit") }}</th>
+        <th scope="col">{{ layout.t("history.col_last") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for state in states %}
+      <tr>
+        <td><span class="mono">{{ state.short() }}</span> <span class="muted small">{% if state.is_tag() %}{{ layout.t("history.tag") }}{% else %}{{ layout.t("history.branch") }}{% endif %}</span>{% if is_deleted(state) %} <span class="badge badge-error">{{ layout.t("event.deleted_at_source") }}</span>{% endif %}</td>
+        <td>{% if let Some(id) = state.new_oid %}<a class="mono small" href="/repos/{{ repo.id }}/commit/{{ id }}">{{ state.new_short().unwrap_or_default() }}</a> · <a class="small" href="/repos/{{ repo.id }}/tree?ref={{ id }}">{{ layout.t("history.files") }}</a>{% endif %}</td>
+        <td class="small">{{ layout.event_label(state.kind) }} · <time title="{{ layout.absolute(state.at) }}">{{ layout.ago(state.at) }}</time></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% if !rewrites.is_empty() %}
+<section class="card table-card">
+  <h2 class="table-card-title">{{ layout.t("history.rewrites_title") }}</h2>
+  <p class="muted small table-card-note">{{ layout.t("history.rewrites_help") }}</p>
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("history.col_ref") }}</th>
+        <th scope="col">{{ layout.t("history.col_before") }}</th>
+        <th scope="col">{{ layout.t("history.col_rewritten_at") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rewrite in rewrites %}
+      <tr>
+        <td class="mono">{{ rewrite.short() }}</td>
+        <td>{% if let Some(id) = rewrite.old_oid %}<a class="mono small" href="/repos/{{ repo.id }}/commit/{{ id }}">{{ rewrite.old_short().unwrap_or_default() }}</a> · <a class="small" href="/repos/{{ repo.id }}/tree?ref={{ id }}">{{ layout.t("history.files") }}</a>{% endif %}</td>
+        <td class="small"><time>{{ layout.absolute(rewrite.at) }}</time></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="card table-card">
+  <h2 class="table-card-title">{{ layout.t("history.events_title") }}</h2>
+  {% if events.is_empty() %}
+  <p class="muted table-card-note">{{ layout.t("history.no_events") }}</p>
+  {% else %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{ layout.t("history.col_time") }}</th>
+        <th scope="col">{{ layout.t("history.col_ref") }}</th>
+        <th scope="col">{{ layout.t("history.col_event") }}</th>
+        <th scope="col">{{ layout.t("history.col_commits") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      {% include "ref_event_row.html" %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% if page > 1 || has_next %}
+<nav class="pager" aria-label="{{ layout.t("browse.pages") }}">
+  {% if page > 1 %}<a class="btn btn-sm" href="{{ page_url(previous_page()) }}">{{ layout.t("browse.newer") }}</a>{% endif %}
+  {% if has_next %}<a class="btn btn-sm" href="{{ page_url(next_page()) }}">{{ layout.t("browse.older") }}</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -12,6 +12,7 @@ use super::auth::CurrentSession;
 use super::prefs::{Prefs, Theme};
 use super::{AppState, format, highlight};
 use crate::db::hosts::Provider;
+use crate::db::ref_events::EventKind;
 use crate::db::repos::RepoStatus;
 use crate::db::sync_runs::RunOutcome;
 use crate::db::unix_now;
@@ -106,6 +107,18 @@ impl Layout {
             RunOutcome::Unreachable => self.status_label(&RepoStatus::Unreachable),
             RunOutcome::Deferred => self.t("status.deferred"),
         }
+    }
+
+    /// The label of a ref history event.
+    pub fn event_label(&self, kind: &EventKind) -> &str {
+        self.t(match kind {
+            EventKind::Baseline => "event.baseline",
+            EventKind::Created => "event.created",
+            EventKind::Moved => "event.moved",
+            EventKind::Rewritten => "event.rewritten",
+            EventKind::DeletedAtSource => "event.deleted_at_source",
+            EventKind::BackAtSource => "event.back_at_source",
+        })
     }
 
     pub fn provider_label(&self, provider: &Provider) -> &str {

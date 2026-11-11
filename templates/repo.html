@@ -72,6 +72,23 @@
           <td class="num">{{ run.refs_rescued }}</td>
           <td class="mono small">{% if let Some(message) = run.message %}{{ message }}{% endif %}</td>
         </tr>
+        {% let run_events = events_of(run) %}
+        {% if !run_events.is_empty() %}
+        <tr class="run-events">
+          <td colspan="6">
+            <details>
+              <summary>{{ events_label(run_events.len()) }}</summary>
+              <table class="table run-events-table">
+                <tbody>
+                  {% for event in run_events %}
+                  {% include "ref_event_row.html" %}
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>

@@ -1,0 +1,14 @@
+<tr>
+  <td class="small"><time title="{{ layout.absolute(event.at) }}">{{ layout.ago(event.at) }}</time></td>
+  <td class="mono">{{ event.short() }}</td>
+  <td><span class="badge badge-event-{{ event.kind.code() }}">{{ layout.event_label(event.kind) }}</span></td>
+  <td class="mono small">
+    {%- if let Some(old) = event.old_oid -%}
+    <a href="/repos/{{ repo.id }}/commit/{{ old }}">{{ event.old_short().unwrap_or_default() }}</a>
+    {%- endif -%}
+    {%- if event.old_oid.is_some() && event.new_oid.is_some() %} → {% endif -%}
+    {%- if let Some(new) = event.new_oid -%}
+    <a href="/repos/{{ repo.id }}/commit/{{ new }}">{{ event.new_short().unwrap_or_default() }}</a>
+    {%- endif -%}
+  </td>
+</tr>

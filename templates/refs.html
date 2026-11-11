@@ -17,7 +17,7 @@
     <tbody>
       {% for entry in list %}
       <tr>
-        <td><a class="mono" href="{{ view.rev_tree_url(entry.name) }}">{{ entry.short }}</a>{% if is_default(entry) %} <span class="badge badge-ok">{{ layout.t("browse.default_branch") }}</span>{% endif %}</td>
+        <td><a class="mono" href="{{ view.rev_tree_url(entry.name) }}">{{ entry.short }}</a>{% if is_default(entry) %} <span class="badge badge-ok">{{ layout.t("browse.default_branch") }}</span>{% endif %}{% if let Some(since) = missing_since(entry) %} <span class="badge badge-error" title="{{ layout.absolute(since) }}">{{ layout.t("event.deleted_at_source") }}</span>{% endif %}</td>
         <td class="small commit-subject">{{ entry.subject }}</td>
         <td class="small"><time title="{{ layout.absolute(entry.time) }}">{{ layout.ago(entry.time) }}</time></td>
         <td><a class="mono small" href="{{ view.commit_url(entry.commit) }}">{{ view.short(entry.commit) }}</a></td>

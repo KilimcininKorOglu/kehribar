@@ -2,6 +2,7 @@
 
 pub mod backups;
 pub mod hosts;
+pub mod ref_events;
 pub mod repos;
 pub mod sessions;
 pub mod settings;
