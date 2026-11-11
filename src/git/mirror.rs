@@ -419,21 +419,28 @@ fn remove_lock_entry(entry: &std::fs::DirEntry, in_root: bool) -> std::io::Resul
     Ok(())
 }
 
-/// Ref name to object id, without the archive's own refs.
-async fn list_refs(git: &Git, dir: &Path) -> Result<BTreeMap<String, String>, GitError> {
-    let out = git
-        .run(
-            Some(dir),
-            ["for-each-ref", "--format=%(objectname) %(refname)"],
-            None,
-        )
-        .await?;
+/// Ref name to object id of the refs that match `pattern`, every ref when
+/// it is `None`. A pattern matches the ref itself and the refs below it.
+async fn ref_ids(
+    git: &Git,
+    dir: &Path,
+    pattern: Option<&str>,
+) -> Result<BTreeMap<String, String>, GitError> {
+    let mut args = vec!["for-each-ref", "--format=%(objectname) %(refname)"];
+    args.extend(pattern);
+    let out = git.run(Some(dir), args, None).await?;
     Ok(String::from_utf8_lossy(&out)
         .lines()
         .filter_map(|line| line.split_once(' '))
-        .filter(|(_, name)| !name.starts_with(ARCHIVE_REF_PREFIX))
         .map(|(id, name)| (name.to_owned(), id.to_owned()))
         .collect())
+}
+
+/// Ref name to object id, without the archive's own refs.
+async fn list_refs(git: &Git, dir: &Path) -> Result<BTreeMap<String, String>, GitError> {
+    let mut refs = ref_ids(git, dir, None).await?;
+    refs.retain(|name, _| !name.starts_with(ARCHIVE_REF_PREFIX));
+    Ok(refs)
 }
 
 /// Refs that are new or point to another object after the fetch.
@@ -486,7 +493,7 @@ async fn rescue(git: &Git, dir: &Path, name: &str, old_id: &str, now: i64) -> Re
     let short = name.strip_prefix("refs/").unwrap_or(name);
     for at in now..now + RESCUE_NAME_TRIES {
         let rescue = format!("{REWRITTEN_REF_PREFIX}{at}/{short}");
-        match ref_target(git, dir, &rescue).await? {
+        match ref_ids(git, dir, Some(&rescue)).await?.remove(&rescue) {
             Some(id) if id == old_id => return Ok(()),
             Some(_) => continue,
             None => {}
@@ -502,23 +509,6 @@ async fn rescue(git: &Git, dir: &Path, name: &str, old_id: &str, now: i64) -> Re
         exit_code: None,
         message: format!("no free name to keep the old commit of {name}"),
     })
-}
-
-/// The object `name` points to, when that exact ref exists.
-async fn ref_target(git: &Git, dir: &Path, name: &str) -> Result<Option<String>, GitError> {
-    let out = git
-        .run(
-            Some(dir),
-            ["for-each-ref", "--format=%(refname) %(objectname)", name],
-            None,
-        )
-        .await?;
-    // The pattern also matches refs below `name`; only the ref itself counts.
-    Ok(String::from_utf8_lossy(&out)
-        .lines()
-        .filter_map(|line| line.split_once(' '))
-        .find(|(found, _)| *found == name)
-        .map(|(_, id)| id.to_owned()))
 }
 
 /// A commit kept when its ref was rewritten.
@@ -537,32 +527,21 @@ pub async fn rescued_refs(
     dir: &Path,
     exclude: &[String],
 ) -> Result<Vec<RescuedRef>, GitError> {
-    let out = git
-        .run(
-            Some(dir),
-            [
-                "for-each-ref",
-                "--format=%(objectname) %(refname)",
-                REWRITTEN_REF_PREFIX,
-            ],
-            None,
-        )
-        .await?;
-    Ok(String::from_utf8_lossy(&out)
-        .lines()
-        .filter_map(parse_rescued)
+    Ok(ref_ids(git, dir, Some(REWRITTEN_REF_PREFIX))
+        .await?
+        .into_iter()
+        .filter_map(|(full, id)| parse_rescued(&full, id))
         .filter(|r| is_tracked(&r.name, exclude))
         .collect())
 }
 
-/// Reads `<id> refs/git-archive/rewritten/<time>/<name without refs/>`.
-fn parse_rescued(line: &str) -> Option<RescuedRef> {
-    let (id, full) = line.split_once(' ')?;
+/// Reads `refs/git-archive/rewritten/<time>/<name without refs/>`.
+fn parse_rescued(full: &str, id: String) -> Option<RescuedRef> {
     let (at, short) = full.strip_prefix(REWRITTEN_REF_PREFIX)?.split_once('/')?;
     Some(RescuedRef {
         at: at.parse().ok()?,
         name: format!("refs/{short}"),
-        id: id.to_owned(),
+        id,
     })
 }
 
@@ -734,18 +713,22 @@ mod tests {
     }
 
     #[test]
-    fn rescued_ref_lines_give_time_and_ref() {
+    fn rescued_ref_names_give_time_and_ref() {
+        let id = || "abc".to_owned();
         assert_eq!(
-            parse_rescued("abc refs/git-archive/rewritten/1700000000/heads/feature/x"),
+            parse_rescued(
+                "refs/git-archive/rewritten/1700000000/heads/feature/x",
+                id()
+            ),
             Some(RescuedRef {
                 at: 1_700_000_000,
                 name: "refs/heads/feature/x".into(),
-                id: "abc".into()
+                id: id()
             })
         );
-        assert_eq!(parse_rescued("abc refs/heads/main"), None);
+        assert_eq!(parse_rescued("refs/heads/main", id()), None);
         assert_eq!(
-            parse_rescued("abc refs/git-archive/rewritten/x/heads/a"),
+            parse_rescued("refs/git-archive/rewritten/x/heads/a", id()),
             None
         );
     }
