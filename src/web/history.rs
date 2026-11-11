@@ -4,6 +4,8 @@
 use askama::Template;
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Response};
+use std::cmp::Ordering;
+
 use serde::Deserialize;
 use time::macros::format_description;
 use time::{Date, OffsetDateTime};
@@ -119,6 +121,49 @@ impl HistoryQuery {
     }
 }
 
+/// Orders ref names as people read versions: a run of digits compares by
+/// its value, so `v0.2.0` comes before `v0.10.0`.
+fn natural_cmp(mut a: &str, mut b: &str) -> Ordering {
+    loop {
+        if a.is_empty() || b.is_empty() {
+            return a.len().cmp(&b.len());
+        }
+        let (part_a, rest_a) = split_part(a);
+        let (part_b, rest_b) = split_part(b);
+        let order = compare_parts(part_a, part_b);
+        if order != Ordering::Equal {
+            return order;
+        }
+        (a, b) = (rest_a, rest_b);
+    }
+}
+
+/// The leading run of digits or of other characters, and the rest.
+fn split_part(text: &str) -> (&str, &str) {
+    let digits = text.starts_with(|c: char| c.is_ascii_digit());
+    let end = text
+        .find(|c: char| c.is_ascii_digit() != digits)
+        .unwrap_or(text.len());
+    text.split_at(end)
+}
+
+fn compare_parts(a: &str, b: &str) -> Ordering {
+    let is_number = |part: &str| part.starts_with(|c: char| c.is_ascii_digit());
+    if !(is_number(a) && is_number(b)) {
+        return a.cmp(b);
+    }
+    let (value_a, value_b) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
+    value_a
+        .len()
+        .cmp(&value_b.len())
+        .then_with(|| value_a.cmp(value_b))
+        .then_with(|| a.len().cmp(&b.len()))
+}
+
+fn sort_by_name(events: &mut [RefEvent]) {
+    events.sort_by(|a, b| natural_cmp(&a.name, &b.name));
+}
+
 /// When the recording began and, for a day `end` before it, the later
 /// rewrites whose old commits are all the history knows of that day.
 async fn recording(
@@ -127,11 +172,12 @@ async fn recording(
     end: i64,
 ) -> sqlx::Result<(Option<i64>, Vec<RefEvent>)> {
     let since = ref_events::recording_since(pool, id).await?;
-    let rewrites = if since.is_some_and(|since| end < since) {
+    let mut rewrites = if since.is_some_and(|since| end < since) {
         ref_events::next_rewrites(pool, id, end).await?
     } else {
         Vec::new()
     };
+    sort_by_name(&mut rewrites);
     Ok((since, rewrites))
 }
 
@@ -146,12 +192,14 @@ pub async fn show(
     let (end, page) = query.parse(now).ok_or(AppError::NotFound)?;
     let (since, rewrites) = recording(pool, id, end).await?;
     let total = ref_events::count_until(pool, id, end).await?;
+    let mut states = ref_events::state_at(pool, id, end).await?;
+    sort_by_name(&mut states);
     let page = HistoryPage {
         layout: ctx.layout(Nav::Repos),
         tab: "history",
         day: day_of(end),
         today: day_of(now),
-        states: ref_events::state_at(pool, id, end).await?,
+        states,
         since,
         rewrites,
         events: ref_events::list_until(pool, id, end, PAGE_SIZE, (page - 1) * PAGE_SIZE).await?,
@@ -173,5 +221,35 @@ mod tests {
         assert_eq!(day_of(1_762_905_599), "2025-11-11");
         assert_eq!(day_end("2025-13-01"), None);
         assert_eq!(day_end("yesterday"), None);
+    }
+
+    #[test]
+    fn version_numbers_sort_by_their_value() {
+        let mut names = [
+            "refs/tags/0.10.0",
+            "refs/tags/v2",
+            "refs/heads/release-10",
+            "refs/tags/0.2.0",
+            "refs/tags/0.2",
+            "refs/heads/main",
+            "refs/heads/release-9",
+            "refs/tags/0.02.0",
+            "refs/tags/v10",
+        ];
+        names.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(
+            names,
+            [
+                "refs/heads/main",
+                "refs/heads/release-9",
+                "refs/heads/release-10",
+                "refs/tags/0.2",
+                "refs/tags/0.2.0",
+                "refs/tags/0.02.0",
+                "refs/tags/0.10.0",
+                "refs/tags/v2",
+                "refs/tags/v10",
+            ]
+        );
     }
 }
