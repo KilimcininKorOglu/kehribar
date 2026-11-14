@@ -20,16 +20,9 @@ use crate::error::AppError;
 /// The readable start of a webhook token.
 pub const WEBHOOK_PREFIX: &str = "khw_";
 
-/// `<site>/hooks/<token>`; the public URL setting wins over the address the
-/// browser used.
+/// `<site>/hooks/<token>`.
 pub fn webhook_url(ctx: &PageContext, token: &str) -> String {
-    let site = ctx
-        .state
-        .config
-        .public_url
-        .as_deref()
-        .map_or_else(|| site_url(ctx), |url| url.trim_end_matches('/').to_owned());
-    format!("{site}/hooks/{token}")
+    format!("{}/hooks/{token}", site_url(ctx))
 }
 
 /// The decrypted webhook token of the repository, when it has one.

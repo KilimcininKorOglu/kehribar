@@ -66,6 +66,27 @@ async fn a_new_token_is_shown_once_and_stored_as_a_hash() {
 }
 
 #[tokio::test]
+async fn the_shown_commands_use_the_public_url_behind_a_proxy() {
+    let t = TestApp::with_public_url("https://archive.example/").await;
+    // A reverse proxy passes its upstream address as Host.
+    let mut request = common::form_request(
+        "/settings/tokens",
+        &format!("kind=clone&name=ci&scope=all&_csrf={}", t.csrf),
+    );
+    let headers = request.headers_mut();
+    headers.insert("cookie", t.cookie.parse().unwrap());
+    headers.insert("host", "127.0.0.1:32783".parse().unwrap());
+    let response = t.send(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = common::body_text(response).await;
+    assert!(
+        html.contains("git clone https://archive.example/git/"),
+        "{html}"
+    );
+    assert!(!html.contains("127.0.0.1"), "{html}");
+}
+
+#[tokio::test]
 async fn a_clone_token_for_selected_repositories_keeps_them() {
     let t = TestApp::new().await;
     let one = add_repo(&t, "one").await;

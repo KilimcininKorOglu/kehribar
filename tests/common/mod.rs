@@ -119,10 +119,28 @@ impl TestApp {
         Self::build(&test_secret_key(), guard).await
     }
 
+    /// An application whose public URL setting is `url`.
+    pub async fn with_public_url(url: &str) -> Self {
+        let url = url.to_owned();
+        Self::build_with(&test_secret_key(), AddressGuard::public_only(), |config| {
+            config.public_url = Some(url);
+        })
+        .await
+    }
+
     async fn build(secret_key: &str, guard: AddressGuard) -> Self {
+        Self::build_with(secret_key, guard, |_| {}).await
+    }
+
+    async fn build_with(
+        secret_key: &str,
+        guard: AddressGuard,
+        change: impl FnOnce(&mut Config),
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = db::open_in_memory().await.unwrap();
-        let config = config_with_key(dir.path(), secret_key);
+        let mut config = config_with_key(dir.path(), secret_key);
+        change(&mut config);
         let state = AppState::with_guard(pool, config, Catalog::load().unwrap(), guard);
         let app = web::router(state.clone())
             .layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 7], 4000))));

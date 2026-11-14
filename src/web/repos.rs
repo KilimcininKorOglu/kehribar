@@ -697,9 +697,14 @@ async fn detail_page(
     })
 }
 
-/// `http(s)://<site>`, as the browser reached the site. The scheme follows
-/// the secure-cookie setting, which is on when the site runs behind HTTPS.
+/// `http(s)://<site>`. The public URL setting wins: behind a reverse proxy
+/// the `Host` header can name the upstream address. Without it the site is
+/// the address the browser used, and the scheme follows the secure-cookie
+/// setting, which is on when the site runs behind HTTPS.
 pub(super) fn site_url(ctx: &PageContext) -> String {
+    if let Some(url) = &ctx.state.config.public_url {
+        return url.trim_end_matches('/').to_owned();
+    }
     let scheme = if ctx.state.config.cookie_secure {
         "https"
     } else {
