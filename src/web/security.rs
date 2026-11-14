@@ -3,11 +3,13 @@
 use std::convert::Infallible;
 
 use axum::body::{Body, Bytes, to_bytes};
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use url::Url;
 
+use super::AppState;
 use super::auth::{CurrentSession, secrets_equal};
 use crate::error::AppError;
 
@@ -29,15 +31,24 @@ fn is_safe(method: &Method) -> bool {
 }
 
 /// Rejects state-changing requests that a browser sent from another site.
-pub async fn same_origin(request: Request, next: Next) -> Response {
-    if is_safe(request.method()) || from_same_site(request.headers()) {
+pub async fn same_origin(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let public = state.config.public_url.as_deref().and_then(public_origin);
+    if is_safe(request.method()) || from_same_site(request.headers(), public.as_deref()) {
         return next.run(request).await;
     }
     tracing::warn!(uri = %request.uri(), "cross-site request refused");
     AppError::Forbidden.into_response()
 }
 
-fn from_same_site(headers: &HeaderMap) -> bool {
+/// The `scheme://host[:port]` origin of the public URL setting.
+fn public_origin(url: &str) -> Option<String> {
+    let origin = Url::parse(url).ok()?.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
+}
+
+/// A reverse proxy can pass its upstream address as `Host`, so the origin of
+/// the public URL setting also counts as this site.
+fn from_same_site(headers: &HeaderMap, public_origin: Option<&str>) -> bool {
     let text = |name| {
         headers
             .get(name)
@@ -46,12 +57,12 @@ fn from_same_site(headers: &HeaderMap) -> bool {
     if text("sec-fetch-site").is_some_and(|site| site == "cross-site") {
         return false;
     }
-    match (text(header::ORIGIN.as_str()), text(header::HOST.as_str())) {
-        // Clients that send no Origin (curl, git) are not browsers.
-        (None, _) => true,
-        (Some(origin), Some(host)) => origin_host(origin) == Some(host),
-        (Some(_), None) => false,
-    }
+    // Clients that send no Origin (curl, git) are not browsers.
+    let Some(origin) = text(header::ORIGIN.as_str()) else {
+        return true;
+    };
+    public_origin == Some(origin)
+        || text(header::HOST.as_str()).is_some_and(|host| origin_host(origin) == Some(host))
 }
 
 /// Returns the `host[:port]` part of an Origin value.
@@ -177,22 +188,40 @@ mod tests {
 
     #[test]
     fn same_site_rules() {
-        assert!(from_same_site(&headers(&[])));
-        assert!(from_same_site(&headers(&[
+        let check = |pairs| from_same_site(&headers(pairs), None);
+        assert!(check(&[]));
+        assert!(check(&[
             ("host", "localhost:8600"),
             ("origin", "http://localhost:8600")
-        ])));
-        assert!(!from_same_site(&headers(&[
+        ]));
+        assert!(!check(&[
             ("host", "localhost:8600"),
             ("origin", "http://evil.example")
-        ])));
-        assert!(!from_same_site(&headers(&[(
-            "sec-fetch-site",
-            "cross-site"
-        )])));
-        assert!(!from_same_site(&headers(&[(
-            "origin",
-            "http://localhost:8600"
-        )])));
+        ]));
+        assert!(!check(&[("sec-fetch-site", "cross-site")]));
+        assert!(!check(&[("origin", "http://localhost:8600")]));
+    }
+
+    #[test]
+    fn the_public_url_is_this_site_behind_a_proxy() {
+        let public = public_origin("https://archive.example/").unwrap();
+        assert_eq!(public, "https://archive.example");
+        // The proxy passes its upstream address as Host.
+        let proxied = |origin| {
+            from_same_site(
+                &headers(&[("host", "127.0.0.1:32783"), ("origin", origin)]),
+                Some(&public),
+            )
+        };
+        assert!(proxied("https://archive.example"));
+        assert!(!proxied("http://archive.example"));
+        assert!(!proxied("https://evil.example"));
+        assert!(from_same_site(
+            &headers(&[
+                ("host", "localhost:8600"),
+                ("origin", "http://localhost:8600")
+            ]),
+            Some(&public),
+        ));
     }
 }

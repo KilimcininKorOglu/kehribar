@@ -196,7 +196,7 @@ pub fn router(state: AppState) -> Router {
         // API clients authenticate with a Bearer token, not with the session.
         .nest("/api/v1", api::router(state.clone()))
         .merge(private)
-        .layer(from_fn(security::same_origin))
+        .layer(from_fn_with_state(state.clone(), security::same_origin))
         .layer(from_fn(security::headers))
         .with_state(state)
 }
