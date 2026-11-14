@@ -510,6 +510,205 @@ textarea:focus {
   margin-top: 0;
 }
 
+/* Form fields in two columns; a wide field takes the whole row. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem 1.25rem;
+  align-items: start;
+  margin-top: 1rem;
+}
+
+.form-grid > .field-wide {
+  grid-column: 1 / -1;
+}
+
+.form-grid select {
+  width: 100%;
+}
+
+.form-grid small {
+  font-weight: 400;
+}
+
+.wide-form-card {
+  max-width: 56rem;
+}
+
+/* A form that opens the card needs no space above its fields. */
+.wide-form-card > form:first-child > .form-grid {
+  margin-top: 0;
+}
+
+/* A checkbox in a grid row sits level with the inputs beside it. */
+.form-grid > .check-aligned {
+  margin-top: 2.1rem;
+}
+
+.disclosure > p {
+  margin: 0;
+}
+
+.section-actions {
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Settings: a section menu beside the sections. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 4.5rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.settings-nav a {
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.settings-sections {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.settings-sections > .card {
+  margin-top: 0;
+}
+
+/* A section reached from the menu stays below the pinned top bar. */
+.settings-section {
+  scroll-margin-top: 4.5rem;
+}
+
+.settings-section > h2 {
+  margin: 0 0 0.25rem;
+}
+
+.settings-section > p {
+  margin: 0.35rem 0 0;
+}
+
+.section-status {
+  margin-top: 0.75rem;
+}
+
+/* A modal dialog without script: the URL fragment or the is-open class
+   shows it, and its backdrop and close links leave it. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4rem 1rem 2rem;
+  overflow-y: auto;
+}
+
+.modal:target,
+.modal.is-open {
+  display: flex;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 60%);
+}
+
+.modal-panel {
+  position: relative;
+  width: min(44rem, 100%);
+  margin: 0;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+.modal-close {
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 0.2rem 0.55rem;
+}
+
+/* Segmented switch between two forms of one page. */
+.segmented {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin: 0 0 1.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.segmented a {
+  padding: 0.4rem 0.9rem;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--muted);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.segmented a:hover {
+  color: var(--text);
+}
+
+.segmented a[aria-current="page"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* Beside one input, a checkbox label gets the rest of the row. */
+@media (min-width: 801px) {
+  .form-grid > .check-aligned {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 800px) {
+  .form-grid > .check-aligned {
+    margin-top: 0;
+  }
+
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
 .disclosure {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
