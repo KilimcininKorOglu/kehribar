@@ -67,7 +67,6 @@ Thumbs.db
 .Trashes/
 __MACOSX/
 docker-compose.yml
-Dockerfile
 Makefile
 README.md
 proje-fikri.txt
