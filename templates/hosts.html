@@ -8,6 +8,7 @@
     <h1>{{ layout.t("hosts.title") }}</h1>
     <p class="muted">{{ layout.t("hosts.intro") }}</p>
   </div>
+  <a class="btn btn-primary" href="#add-host">{{ layout.t("hosts.add") }}</a>
 </div>
 {% if let Some(notice) = notice %}<p class="alert alert-ok" role="status">{{ notice }}</p>{% endif %}
 
@@ -42,9 +43,15 @@
 </section>
 {% endif %}
 
-<section class="card form-card">
-  <h2>{{ layout.t("hosts.add") }}</h2>
-  {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
-  {% include "host_form.html" %}
-</section>
+<div class="modal{% if error.is_some() %} is-open{% endif %}" id="add-host" role="dialog" aria-modal="true" aria-labelledby="add-host-title">
+  <a class="modal-backdrop" href="/hosts" tabindex="-1" aria-hidden="true"></a>
+  <section class="card modal-panel">
+    <div class="modal-head">
+      <h2 id="add-host-title">{{ layout.t("hosts.add") }}</h2>
+      <a class="btn btn-ghost modal-close" href="/hosts" aria-label="{{ layout.t("form.cancel") }}">&times;</a>
+    </div>
+    {% if let Some(error) = error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+    {% include "host_form.html" %}
+  </section>
+</div>
 {% endblock %}

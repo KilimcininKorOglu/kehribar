@@ -75,6 +75,15 @@ async fn invalid_and_duplicate_hosts_are_rejected() {
     }
     assert!(hosts::list(&t.state.pool).await.unwrap().is_empty());
 
+    // The add form is a modal: closed on the list, open after a refused form.
+    let list = body_text(t.get("/hosts").await).await;
+    assert!(list.contains("class=\"modal\" id=\"add-host\""), "{list}");
+    let refused = body_text(t.post("/hosts", "host=github.com&provider=svn").await).await;
+    assert!(
+        refused.contains("class=\"modal is-open\" id=\"add-host\""),
+        "{refused}"
+    );
+
     t.post("/hosts", HOST_FORM).await;
     let again = t.post("/hosts", "host=github.com&provider=generic").await;
     assert_eq!(again.status(), StatusCode::UNPROCESSABLE_ENTITY);
