@@ -63,7 +63,22 @@ async fn bulk_add_reports_every_line_and_keeps_the_failed_ones() {
 
     let bad = t.post("/repos/bulk", "urls=x&interval=0").await;
     assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_text(bad).await.contains("name=\"urls\""));
     assert_eq!(repos::list(&t.state.pool, None).await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn the_add_page_shows_one_form_per_tab() {
+    let t = TestApp::new().await;
+    let single = body_text(t.get("/repos/new").await).await;
+    assert!(single.contains("name=\"url\""), "{single}");
+    assert!(!single.contains("name=\"urls\""), "{single}");
+    let bulk = body_text(t.get("/repos/new?mode=bulk").await).await;
+    assert!(bulk.contains("name=\"urls\""), "{bulk}");
+    assert!(!bulk.contains("name=\"url\""), "{bulk}");
+    // A refused single URL stays on its tab.
+    let refused = body_text(t.post("/repos", "url=ftp%3A%2F%2Fx").await).await;
+    assert!(refused.contains("name=\"url\""), "{refused}");
 }
 
 #[tokio::test]

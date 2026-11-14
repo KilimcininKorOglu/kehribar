@@ -358,6 +358,8 @@ struct NewPage {
     interval: String,
     username: String,
     error: Option<String>,
+    /// The tab of the page: the bulk form instead of the single URL form.
+    bulk: bool,
     /// The URL list of the bulk form; after a run, the lines that failed.
     bulk_urls: String,
     bulk_rows: Vec<BulkRow>,
@@ -373,6 +375,7 @@ impl NewPage {
             interval: String::new(),
             username: String::new(),
             error: None,
+            bulk: false,
             bulk_urls: String::new(),
             bulk_rows: Vec::new(),
             bulk_error: None,
@@ -449,8 +452,18 @@ pub(super) async fn add_repo(
     Ok(Added::Yes(id))
 }
 
-pub async fn new_form(ctx: PageContext) -> Result<Response, AppError> {
-    let page = NewPage::blank(ctx.layout(Nav::Repos));
+#[derive(Deserialize)]
+pub struct NewQuery {
+    mode: Option<String>,
+}
+
+/// `GET /repos/new`; `?mode=bulk` opens the tab of the bulk form.
+pub async fn new_form(
+    ctx: PageContext,
+    Query(query): Query<NewQuery>,
+) -> Result<Response, AppError> {
+    let mut page = NewPage::blank(ctx.layout(Nav::Repos));
+    page.bulk = query.mode.as_deref() == Some("bulk");
     Ok(render(&page)?.into_response())
 }
 
@@ -510,6 +523,7 @@ pub async fn create_bulk(
     Form(form): Form<BulkForm>,
 ) -> Result<Response, AppError> {
     let mut page = NewPage::blank(ctx.layout(Nav::Repos));
+    page.bulk = true;
     page.wiki = is_checked(form.wiki.as_deref());
     page.interval = form.interval.clone().unwrap_or_default();
     let Ok(interval) = optional_number(form.interval.as_deref(), INTERVAL_RANGE) else {

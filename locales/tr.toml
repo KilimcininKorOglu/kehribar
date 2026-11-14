@@ -266,6 +266,8 @@ back = "Ayarlara dön"
 
 [repo_new]
 title = "Repo ekle"
+tab_single = "Tek repo"
+tab_bulk = "Birden çok repo"
 url = "Git URL'si"
 url_help = "https://github.com/kullanıcı/repo gibi bir HTTP(S) adresi ya da git@github.com:kullanıcı/repo.git gibi bir SSH adresi. SSH ile çekerken sunucunun SSH anahtarı kullanılır. GitLab alt gruplarındaki repolar da eklenebilir."
 interval = "Güncelleme aralığı (dakika)"

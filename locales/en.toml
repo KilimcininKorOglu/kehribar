@@ -275,6 +275,8 @@ back = "Back to settings"
 
 [repo_new]
 title = "Add repository"
+tab_single = "One repository"
+tab_bulk = "Many repositories"
 url = "Git URL"
 url_help = "An HTTP(S) address such as https://github.com/owner/name, or an SSH address such as git@github.com:owner/name.git. An SSH fetch uses the SSH key of the host. GitLab subgroups are supported."
 interval = "Update interval (minutes)"

@@ -4,51 +4,13 @@
 
 {% block content %}
 <nav class="breadcrumb" aria-label="breadcrumb"><a href="/">{{ layout.t("repos.title") }}</a> / {{ layout.t("repo_new.title") }}</nav>
-<section class="card form-card">
-  <h1>{{ layout.t("repo_new.title") }}</h1>
-  {% if let Some(error) = error %}
-  <p class="alert alert-error" role="alert">{{ error }}</p>
-  {% endif %}
-  <form method="post" action="/repos" class="stack">
-    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
-    <label class="field">
-      <span>{{ layout.t("repo_new.url") }}</span>
-      <input name="url" type="text" inputmode="url" required autofocus value="{{ url }}" placeholder="https://github.com/owner/name" spellcheck="false" autocomplete="off">
-      <small class="muted">{{ layout.t("repo_new.url_help") }}</small>
-    </label>
-    <label class="field">
-      <span>{{ layout.t("repo_new.interval") }}</span>
-      <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
-      <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
-    </label>
-    <label class="check">
-      <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
-      <span>{{ layout.t("repo_new.wiki") }}</span>
-    </label>
-    <details class="disclosure"{% if !username.is_empty() %} open{% endif %}>
-      <summary>{{ layout.t("cred.private") }}</summary>
-      <div class="stack">
-        <p class="muted small">{{ layout.t("cred.private_help") }}</p>
-        <label class="field">
-          <span>{{ layout.t("cred.username") }}</span>
-          <input name="username" value="{{ username }}" spellcheck="false" autocomplete="off">
-          <small class="muted">{{ layout.t("cred.username_help") }}</small>
-        </label>
-        <label class="field">
-          <span>{{ layout.t("cred.repo_token") }}</span>
-          <input name="token" type="password" autocomplete="new-password" spellcheck="false">
-          <small class="muted">{{ layout.t("cred.repo_token_help") }}</small>
-        </label>
-      </div>
-    </details>
-    <div class="actions">
-      <button class="btn btn-primary" type="submit">{{ layout.t("repo_new.submit") }}</button>
-      <a class="btn btn-ghost" href="/">{{ layout.t("form.cancel") }}</a>
-    </div>
-  </form>
-</section>
-
-<section class="card form-card" id="bulk">
+<div class="page-head"><h1>{{ layout.t("repo_new.title") }}</h1></div>
+<nav class="segmented" aria-label="{{ layout.t("repo_new.title") }}">
+  <a href="/repos/new"{% if !bulk %} aria-current="page"{% endif %}>{{ layout.t("repo_new.tab_single") }}</a>
+  <a href="/repos/new?mode=bulk"{% if bulk %} aria-current="page"{% endif %}>{{ layout.t("repo_new.tab_bulk") }}</a>
+</nav>
+{% if bulk %}
+<section class="card wide-form-card" id="bulk">
   <h2>{{ layout.t("bulk.title") }}</h2>
   <p class="muted small">{{ layout.t("bulk.help") }}</p>
   {% if let Some(error) = bulk_error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
@@ -79,24 +41,73 @@
     </table>
   </div>
   {% endif %}
-  <form method="post" action="/repos/bulk#bulk" class="stack">
+  <form method="post" action="/repos/bulk">
     <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
-    <label class="field">
-      <span>{{ layout.t("bulk.urls") }}</span>
-      <textarea name="urls" rows="8" required spellcheck="false" autocomplete="off" placeholder="https://github.com/owner/name&#10;git@gitlab.com:group/project.git">{{ bulk_urls }}</textarea>
-    </label>
-    <label class="field">
-      <span>{{ layout.t("repo_new.interval") }}</span>
-      <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
-      <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
-    </label>
-    <label class="check">
-      <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
-      <span>{{ layout.t("repo_new.wiki") }}</span>
-    </label>
-    <div class="actions">
+    <div class="form-grid">
+      <label class="field field-wide">
+        <span>{{ layout.t("bulk.urls") }}</span>
+        <textarea name="urls" rows="8" required autofocus spellcheck="false" autocomplete="off" placeholder="https://github.com/owner/name&#10;git@gitlab.com:group/project.git">{{ bulk_urls }}</textarea>
+      </label>
+      <label class="field">
+        <span>{{ layout.t("repo_new.interval") }}</span>
+        <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
+        <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
+      </label>
+      <label class="check check-aligned">
+        <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
+        <span>{{ layout.t("repo_new.wiki") }}</span>
+      </label>
+    </div>
+    <div class="actions section-actions">
       <button class="btn btn-primary" type="submit">{{ layout.t("bulk.submit") }}</button>
+      <a class="btn btn-ghost" href="/">{{ layout.t("form.cancel") }}</a>
     </div>
   </form>
 </section>
+{% else %}
+<section class="card wide-form-card">
+  {% if let Some(error) = error %}
+  <p class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/repos">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf_token() }}">
+    <div class="form-grid">
+      <label class="field field-wide">
+        <span>{{ layout.t("repo_new.url") }}</span>
+        <input name="url" type="text" inputmode="url" required autofocus value="{{ url }}" placeholder="https://github.com/owner/name" spellcheck="false" autocomplete="off">
+        <small class="muted">{{ layout.t("repo_new.url_help") }}</small>
+      </label>
+      <label class="field">
+        <span>{{ layout.t("repo_new.interval") }}</span>
+        <input name="interval" type="number" min="1" max="10080" value="{{ interval }}" inputmode="numeric">
+        <small class="muted">{{ layout.t("repo_new.interval_help") }}</small>
+      </label>
+      <label class="check check-aligned">
+        <input type="checkbox" name="wiki" value="1"{% if wiki %} checked{% endif %}>
+        <span>{{ layout.t("repo_new.wiki") }}</span>
+      </label>
+      <details class="disclosure field-wide"{% if !username.is_empty() %} open{% endif %}>
+        <summary>{{ layout.t("cred.private") }}</summary>
+        <p class="muted small">{{ layout.t("cred.private_help") }}</p>
+        <div class="form-grid">
+          <label class="field">
+            <span>{{ layout.t("cred.username") }}</span>
+            <input name="username" value="{{ username }}" spellcheck="false" autocomplete="off">
+            <small class="muted">{{ layout.t("cred.username_help") }}</small>
+          </label>
+          <label class="field">
+            <span>{{ layout.t("cred.repo_token") }}</span>
+            <input name="token" type="password" autocomplete="new-password" spellcheck="false">
+            <small class="muted">{{ layout.t("cred.repo_token_help") }}</small>
+          </label>
+        </div>
+      </details>
+    </div>
+    <div class="actions section-actions">
+      <button class="btn btn-primary" type="submit">{{ layout.t("repo_new.submit") }}</button>
+      <a class="btn btn-ghost" href="/">{{ layout.t("form.cancel") }}</a>
+    </div>
+  </form>
+</section>
+{% endif %}
 {% endblock %}
